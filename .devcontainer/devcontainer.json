@@ -1,5 +1,9 @@
 {
   "name": "ad_project",
+  "build": {
+	  "dockerfile": "../Dockerfile",
+	  "context": ".."
+  },
   "image": "ad_project",
   
   "runArgs": [
