@@ -1,0 +1,27 @@
+{
+  "name": "ad_project",
+  "image": "ad_project",
+  
+  "runArgs": [
+    "--rm",
+    "--ipc=host",
+    "--gpus=all"
+  ],
+
+  "hostRequirements": {
+    "memory": "64gb"
+  },
+  "appPort": [
+    "8888:8888"
+  ],
+
+  "workspaceFolder": "/workspace",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python"
+      ]
+    }
+  }
+}
