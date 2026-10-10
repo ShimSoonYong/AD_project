@@ -1,2 +1,4 @@
 dataset/FashionMNIST/*
 git_token.txt
+*/__pycache__/*
+logs/*

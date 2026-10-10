@@ -65,7 +65,7 @@ class Trainer:
 
     def fit(self):
         print(f"Model fitting for {self.epochs}")
-        pbar = tqdm(range(self.epochs), desc="Fitting:", leave=False)
+        pbar = tqdm(range(1, self.epochs + 1), desc="Fitting:", leave=False)
         for epoch in pbar:
             self.train(epoch)
             self.validate(epoch)
