@@ -1,5 +1,6 @@
 import os
 
+os.chdir("/workspace")
 print("Running main.py in", os.getcwd())
 
 from argparse import ArgumentParser, Namespace
