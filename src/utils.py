@@ -52,6 +52,7 @@ class Scorer:
                 ax[1][i].set_ylabel("Output")
 
         plt.savefig(f"{self.LOG_DIR}/epoch{epoch}_compare_io.png")
+        plt.close()
 
     @torch.inference_mode()
     def collect_record(self, epoch: int):
@@ -102,6 +103,7 @@ class Scorer:
         plt.axvline(self.THRESHOLDVAL, 0, 1, color="red", linestyle="--", linewidth=1)
         plt.legend(loc="upper right")
         plt.savefig(f"{self.LOG_DIR}/epoch{epoch}_score_hist.png")
+        plt.close()
 
     def plot_auc(self, epoch: int):
         # Generating AUROC
@@ -119,6 +121,7 @@ class Scorer:
         plt.xlabel("FPR")
         plt.ylabel("TPR")
         plt.savefig(f"{self.LOG_DIR}/epoch{epoch}_auroc.png")
+        plt.close()
 
     def save_record(self, epoch: int):
         self.record.pop("normal", None)
