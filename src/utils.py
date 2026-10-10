@@ -118,7 +118,7 @@ class Scorer:
         plt.title(f"AUROC: {auroc}")
         plt.xlabel("FPR")
         plt.ylabel("TPR")
-        plt.savefig(f"epoch{epoch}_auroc.png")
+        plt.savefig(f"{self.LOG_DIR}/epoch{epoch}_auroc.png")
 
     def save_record(self, epoch: int):
         self.record.pop("normal", None)
