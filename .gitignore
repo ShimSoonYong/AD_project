@@ -1,1 +1,2 @@
-dataset/FashionMNIST/raw/*
+dataset/FashionMNIST/*
+git_token.txt

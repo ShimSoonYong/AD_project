@@ -1,107 +1,130 @@
 import torch
+from torch import nn
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader
 from sklearn.metrics import auc, roc_curve
-from src.data import SELECT_NORMAL
+from data import SELECT_NORMAL
+
 
 class Scorer:
-    def __init__(self, model, loader, threshold=0.01, criterion, device):
+    def __init__(
+        self,
+        model: nn.Module,
+        loader: DataLoader,
+        threshold: float,
+        criterion: nn.Module,
+        log_dir: str,
+        device: torch.device,
+    ):
+
         self.model = model
         self.loader = loader
-        self.THRESHOLDVAL = threshold # threshold val
+        self.THRESHOLDVAL = threshold  # threshold val
         self.criterion = criterion
+        self.LOG_DIR = log_dir
         self.DEVICE = device
-        self.epoch = 0
 
     @torch.inference_mode()
-    def visualize_IO(self, samples, num_samples=4):
+    def visualize_IO(self, epoch: int, samples: torch.Tensor, num_samples: int = 4):
 
-        print("Making figures...")
-        fig, ax =plt.subplots(2, num_samples, figsize=(num_samples, 2))
+        print("Making comparision figures...")
+        _, ax = plt.subplots(2, num_samples, figsize=(num_samples, 2))
 
         for i in range(num_samples):
-            img = samples.cpu().data.numpy()[i]
-            a[0][i].imshow(img, cmap='gray')
-            a[0][i].set_xticks(())
-            a[0][i].set_yticks(())
+            img = samples.cpu().data.numpy()[i].reshape(28, 28, -1)
+            ax[0][i].imshow(img, cmap="gray")
+            ax[0][i].set_xticks(())
+            ax[0][i].set_yticks(())
 
-            if(i == 0):
-                a[0][i].set_ylabel('Input')
+            if i == 0:
+                ax[0][i].set_ylabel("Input")
 
-        for i in range(len(test_label)):
-            img = decoded.cpu().data.numpy()[i]
-            a[1][i].imshow(img, cmap='gray')
-            a[1][i].set_xticks(())
-            a[1][i].set_yticks(())
+        decoded = self.model(samples)
+        for i in range(num_samples):
+            img = decoded.cpu().data.numpy()[i].reshape(28, 28, -1)
+            ax[1][i].imshow(img, cmap="gray")
+            ax[1][i].set_xticks(())
+            ax[1][i].set_yticks(())
 
-            if(i == 0): 
-                a[1][i].set_ylabel('Output')
+            if i == 0:
+                ax[1][i].set_ylabel("Output")
 
-        plt.savefig("compare_io.png")
-
+        plt.savefig(f"{self.LOG_DIR}/epoch{epoch}_compare_io.png")
 
     @torch.inference_mode()
-    def collect_record(self):
-        record = {'id':[], 'label':[], 'score':[],'normal':[]}
+    def collect_record(self, epoch: int):
+        record = {"id": [], "label": [], "score": [], "normal": []}
 
         print("Collecting scores")
-        count=0
         for step, (x, label) in enumerate(self.loader):
-
             print("Decoding samples to visualize")
+            x = x.to(self.DEVICE)
             decoded = self.model(x)
             loss = float(self.criterion(decoded, x).cpu().numpy())
 
-            self.visualize_IO(x)
+            record["id"].append(step)
+            record["label"].append(int(label != SELECT_NORMAL))
+            record["score"].append(loss)  # anomaly score
 
-            record['id'].append(step)
-            record['label'].append(int(label!=SELECT_NORMAL))
-            record['score'].append(loss) # anomaly score
-
-            if loss > THRESHOLDVAL:
-                record['normal'].append('0')
+            if loss > self.THRESHOLDVAL:
+                record["normal"].append("0")
             else:
-                record['normal'].append('1')
+                record["normal"].append("1")
 
         self.record = record
 
-    def plot_score(self):
+    def plot_score(self, epoch: int):
         print("Visualizaing anomaly scores")
-        label = np.array(self.record['label'])
-        score = np.array(self.record['score'])
+        label = np.array(self.record["label"])
+        score = np.array(self.record["score"])
 
         score_min = score.min()
         score_max = score.max()
 
-        plt.hist(score[np.where(label == 0)[0]], bins=30, range=(score_min, score_max), alpha=0.5, label='Normal')
-        plt.hist(score[np.where(arr_label == 1)[0]], bins=30, range=(score_min, score_max), alpha=0.5, label='Abnormal')
+        plt.hist(
+            score[np.where(label == 0)[0]],
+            bins=30,
+            range=(score_min, score_max),
+            alpha=0.5,
+            label="Normal",
+        )
+        plt.hist(
+            score[np.where(label == 1)[0]],
+            bins=30,
+            range=(score_min, score_max),
+            alpha=0.5,
+            label="Abnormal",
+        )
         plt.xlabel("Anomaly score")
         plt.ylabel("Frequency")
-        plt.axvline(self.THRESHOLDVAL, 0, 1, color='red', linestyle='--', linewidth=1)
-        plt.legend(loc='upper right')
-        plt.savefig("score_hist.png")
+        plt.axvline(self.THRESHOLDVAL, 0, 1, color="red", linestyle="--", linewidth=1)
+        plt.legend(loc="upper right")
+        plt.savefig(f"{self.LOG_DIR}/epoch{epoch}_score_hist.png")
 
-    def plot_auc(self):
+    def plot_auc(self, epoch: int):
         # Generating AUROC
-        #https://scikit-learn.org/stable/modules/generated/sklearn.metrics.roc_curve.html
-        #https://scikit-learn.org/stable/modules/generated/sklearn.metrics.auc.html
-
-        auroc = auc(fpr, tpr)
-        print("AUROC: {}".format(auroc))
+        # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.roc_curve.html
+        # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.auc.html
 
         print("Visualizing ROC curve")
-        fpr, tpr, thresholds = roc_curve(self.record['label'], self.record['score'], pos_label=1)
+        fpr, tpr, thresholds = roc_curve(
+            self.record["label"], self.record["score"], pos_label=1
+        )
         plt.plot(fpr, tpr)
+        auroc = auc(fpr, tpr)
+        print(f"AUROC: {auroc}")
         plt.title(f"AUROC: {auroc}")
         plt.xlabel("FPR")
         plt.ylabel("TPR")
-        plt.savefig("auroc.png")
+        plt.savefig(f"epoch{epoch}_auroc.png")
 
-    def save_record(self):
-        self.record.pop('normal',None)
-        self.record.pop('label',None)
+    def save_record(self, epoch: int):
+        self.record.pop("normal", None)
+        self.record.pop("label", None)
         df = pd.DataFrame.from_dict(self.record)
-        teamnumber = 2 # insert your teamnumber
-        df.to_csv("result_team_{}.csv".format(teamnumber), index = False) # Index should be not included in the .csv file.
-
+        teamnumber = 2  # insert your teamnumber
+        df.to_csv(
+            f"{self.LOG_DIR}/epoch{epoch}_result_team_{teamnumber}.csv", index=False
+        )  # Index should be not included in the .csv file.
