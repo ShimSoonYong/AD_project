@@ -163,7 +163,7 @@ def main(args: Namespace):
         trained_model = trainer.fit()
 
         print("Saving model")
-        save_path = args.log_dir + f"{name}/checkpoint"
+        save_path = args.log_dir + f"/{name}/checkpoint"
         os.makedirs(save_path, mode=751, exist_ok=True)
         torch.save(trained_model.state_dict(), save_path + "/final_{name}_weight.pth")
         print(f"Final trained model saved at {save_path}")
