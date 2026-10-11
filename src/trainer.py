@@ -1,7 +1,8 @@
 import torch
 from tqdm import tqdm
-from torch import nn, optim
 from utils import Scorer
+from torch import nn, optim
+from torch.amp import autocast
 from torch.utils.data import DataLoader
 
 
@@ -19,6 +20,7 @@ class Trainer:
     ):
 
         self.model = model
+        self.model.compile()
         self.epochs = epochs
         self.train_loader = train_loader
         self.test_loader = test_loader
@@ -27,6 +29,7 @@ class Trainer:
         self.scorer = scorer
         self.device = device
 
+    @autocast(device_type="cuda")
     def train(self, epoch: int):
         self.model.train()
         print(f"{epoch} epoch Training starts")

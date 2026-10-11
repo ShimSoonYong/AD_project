@@ -1,3 +1,4 @@
+import os
 import torch
 from torch import nn
 import numpy as np
@@ -25,6 +26,10 @@ class Scorer:
         self.criterion = criterion
         self.LOG_DIR = log_dir
         self.DEVICE = device
+        os.makedirs(f"{self.LOG_DIR}/compare_io", mode=751, exist_ok=True)
+        os.makedirs(f"{self.LOG_DIR}/hist", mode=751, exist_ok=True)
+        os.makedirs(f"{self.LOG_DIR}/auroc", mode=751, exist_ok=True)
+        os.makedirs(f"{self.LOG_DIR}/record", mode=751, exist_ok=True)
 
     @torch.inference_mode()
     def visualize_IO(self, epoch: int, samples: torch.Tensor, num_samples: int = 4):
@@ -50,7 +55,7 @@ class Scorer:
             if i == 0:
                 ax[1][i].set_ylabel("Output")
 
-        plt.savefig(f"{self.LOG_DIR}/epoch{epoch}_compare_io.png")
+        plt.savefig(f"{self.LOG_DIR}/compare_io/epoch{epoch}_compare_io.png")
         plt.close()
 
     @torch.inference_mode()
@@ -98,7 +103,7 @@ class Scorer:
         plt.ylabel("Frequency")
         plt.axvline(self.THRESHOLDVAL, 0, 1, color="red", linestyle="--", linewidth=1)
         plt.legend(loc="upper right")
-        plt.savefig(f"{self.LOG_DIR}/epoch{epoch}_score_hist.png")
+        plt.savefig(f"{self.LOG_DIR}/hist/epoch{epoch}_score_hist.png")
         plt.close()
 
     def plot_auc(self, epoch: int):
@@ -115,7 +120,7 @@ class Scorer:
         plt.title(f"AUROC: {auroc}")
         plt.xlabel("FPR")
         plt.ylabel("TPR")
-        plt.savefig(f"{self.LOG_DIR}/epoch{epoch}_auroc.png")
+        plt.savefig(f"{self.LOG_DIR}/auroc/epoch{epoch}_auroc.png")
         plt.close()
 
     def save_record(self, epoch: int):
@@ -124,5 +129,6 @@ class Scorer:
         df = pd.DataFrame.from_dict(self.record)
         teamnumber = 2  # insert your teamnumber
         df.to_csv(
-            f"{self.LOG_DIR}/epoch{epoch}_result_team_{teamnumber}.csv", index=False
+            f"{self.LOG_DIR}/record/epoch{epoch}_result_team_{teamnumber}.csv",
+            index=False,
         )  # Index should be not included in the .csv file.

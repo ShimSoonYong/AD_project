@@ -17,7 +17,7 @@ def get_args():
     parser = ArgumentParser()
     parser.add_argument(
         "--models",
-        type=list,
+        nargs="+",
         default=["Autoencoder"],
         help="A list of models to train and evaluate",
     )
@@ -43,7 +43,10 @@ def get_args():
         "--lr", type=float, default=1e-4, help="Learning rate to pass optimizer"
     )
     parser.add_argument(
-        "--epochs", type=int, default=100, help="Number of epochs to run"
+        "--epochs",
+        type=int,
+        default=100,
+        help="Number of epochs to run, default is 100",
     )
     parser.add_argument(
         "--augment",
@@ -100,7 +103,7 @@ def main(args: Namespace):
             model_list.append(getattr(models, m))
     except AttributeError as e:
         print(e)
-        print(f"Please check {args.model} exist at models.py script.")
+        print(f"Please check {args.models} exist at models.py script.")
 
     try:
         criterion_class = getattr(nn, args.criterion)
@@ -118,8 +121,8 @@ def main(args: Namespace):
     print(f"Running on {args.device}")
 
     print("Setting directories")
-    os.makedirs(args.data_root, exist_ok=True)
-    os.makedirs(args.log_dir, exist_ok=True)
+    os.makedirs(args.data_root, mode=751, exist_ok=True)
+    os.makedirs(args.log_dir, mode=751, exist_ok=True)
 
     print("Get data loaders")
     train_set, test_set = load_dataset(root=args.data_root, transform=augmentations)
@@ -132,13 +135,15 @@ def main(args: Namespace):
         criterion = criterion_class()
         optimizer = optimizer_class(model.parameters(), lr=args.lr)
 
+        log_path = args.log_dir + "/" + name
+        os.makedirs(log_path, mode=751, exist_ok=True)
         print("Initializing Scorer")
         scorer = Scorer(
             model=model,
             loader=test_loader,
             threshold=args.threshold,
             criterion=criterion,
-            log_dir=args.log_dir,
+            log_dir=log_path,
             device=device,
         )
 
@@ -158,9 +163,10 @@ def main(args: Namespace):
         trained_model = trainer.fit()
 
         print("Saving model")
-        path = args.log_dir + f"checkpoint/final_{name}.pth"
-        torch.save(trained_model.state_dict(), path)
-        print(f"Final trained model saved at {path}")
+        save_path = args.log_dir + f"{name}/checkpoint"
+        os.makedirs(save_path, mode=751, exist_ok=True)
+        torch.save(trained_model.state_dict(), save_path + "/final_{name}_weight.pth")
+        print(f"Final trained model saved at {save_path}")
 
 
 if __name__ == "__main__":
