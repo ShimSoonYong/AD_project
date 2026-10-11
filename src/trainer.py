@@ -31,7 +31,13 @@ class Trainer:
         self.model.train()
         print(f"{epoch} epoch Training starts")
 
-        pbar = tqdm(self.train_loader, desc=f"{epoch} Epoch training:", leave=False)
+        loss = torch.tensor(0)
+        pbar = tqdm(
+            self.train_loader,
+            desc=f"{epoch} Epoch training:",
+            postfix={"Loss": loss.item()},
+            leave=False,
+        )
         for step, (x, label) in enumerate(pbar):
             x = x.to(self.device)
 
@@ -41,21 +47,28 @@ class Trainer:
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-            pbar.set_postfix({"Loss:": loss.item()})
             self.scorer.visualize_IO(epoch, x)
+            pbar.set_postfix({"Loss": loss.item()})
 
     @torch.inference_mode()
     def validate(self, epoch: int):
         self.model.eval()
         print(f"{epoch} epoch Validation starts")
 
-        pbar = tqdm(self.test_loader, desc=f"{epoch} Epoch validation:", leave=False)
+        loss = torch.tensor(0)
+        pbar = tqdm(
+            self.test_loader,
+            desc=f"{epoch} Epoch validation:",
+            postfix={"Loss": loss.item()},
+            leave=False,
+        )
         for step, (x, label) in enumerate(pbar):
             x = x.to(self.device)
 
             decoded = self.model(x)
 
             loss = self.criterion(decoded, x)
+
             pbar.set_postfix({"Loss": loss.item()})
 
         self.scorer.collect_record(epoch)
@@ -65,6 +78,7 @@ class Trainer:
 
     def fit(self):
         print(f"Model fitting for {self.epochs}")
+
         pbar = tqdm(range(1, self.epochs + 1), desc="Fitting:", leave=False)
         for epoch in pbar:
             self.train(epoch)

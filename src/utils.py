@@ -29,7 +29,6 @@ class Scorer:
     @torch.inference_mode()
     def visualize_IO(self, epoch: int, samples: torch.Tensor, num_samples: int = 4):
 
-        print("Making comparision figures...")
         _, ax = plt.subplots(2, num_samples, figsize=(num_samples, 2))
 
         for i in range(num_samples):
@@ -58,9 +57,7 @@ class Scorer:
     def collect_record(self, epoch: int):
         record = {"id": [], "label": [], "score": [], "normal": []}
 
-        print("Collecting scores")
         for step, (x, label) in enumerate(self.loader):
-            print("Decoding samples to visualize")
             x = x.to(self.DEVICE)
             decoded = self.model(x)
             loss = float(self.criterion(decoded, x).cpu().numpy())
@@ -77,7 +74,6 @@ class Scorer:
         self.record = record
 
     def plot_score(self, epoch: int):
-        print("Visualizaing anomaly scores")
         label = np.array(self.record["label"])
         score = np.array(self.record["score"])
 
@@ -110,7 +106,6 @@ class Scorer:
         # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.roc_curve.html
         # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.auc.html
 
-        print("Visualizing ROC curve")
         fpr, tpr, thresholds = roc_curve(
             self.record["label"], self.record["score"], pos_label=1
         )

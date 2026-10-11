@@ -25,7 +25,7 @@ class Autoencoder(nn.Module):
         x = x.view(-1, 28 * 28)
         encoded = self.encoder(x)
         decoded = self.decoder(encoded)
-        decoded = decoded.view(-1, 28, 28)
+        decoded = decoded.view(-1, 1, 28, 28)
 
         return decoded
 
