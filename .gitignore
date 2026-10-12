@@ -2,3 +2,8 @@ dataset/FashionMNIST/*
 git_token.txt
 */__pycache__/*
 logs/*
+
+# Local Python environments, setup tools, and notebook caches
+.venv/
+
+

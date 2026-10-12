@@ -1,0 +1,28 @@
+# Python 3.12 / NVIDIA RTX 5060 Laptop / CUDA 13.0 wheels
+# Install: .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+# Declared requirements; not a lock file of an installed environment.
+--index-url https://pypi.org/simple
+--extra-index-url https://download.pytorch.org/whl/cu130
+
+# PyTorch: explicit CUDA builds prevent selecting CPU-only wheels.
+torch==2.14.1+cu130
+torchvision==0.29.1+cu130
+
+# Data processing, evaluation, and visualization
+numpy>=1.26,<3
+pandas>=2.2,<3
+matplotlib>=3.8,<4
+scikit-learn>=1.4,<2
+tqdm>=4.66,<5
+
+# Jupyter development environment
+jupyterlab>=4,<5
+ipykernel>=6,<8
+
+# Vision dependencies from the existing hardware requirements
+opencv-python==4.11.0.86
+pillow==12.3.0
+pycocotools==2.0.11
+safetensors==0.8.0
+einops==0.8.2
+timm==1.0.15

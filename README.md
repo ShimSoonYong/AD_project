@@ -65,6 +65,74 @@
 
 ## 4. Getting Started (환경 세팅)
 
+### Windows 로컬 Python 가상환경
+
+현재 노트북용 구성은 **Python 3.12 (64-bit) + PyTorch 2.14.1 + torchvision 0.29.1 + CUDA 13.0 wheel**입니다.
+
+| 항목 | 사양 / 설정 |
+| --- | --- |
+| CPU | AMD Ryzen 7 260 (사용자 제공) |
+| GPU | NVIDIA GeForce RTX 5060 Laptop GPU, VRAM 8GB, compute capability 12.0 |
+| GPU 드라이버 | 616.92 |
+| RAM | 32GB (사용자 제공) |
+| 가상환경 위치 | `03 AD_Git/.venv` |
+| 프로젝트 마감 | 2026-10-26 |
+
+RTX 50 시리즈는 Blackwell 지원 빌드가 필요하므로 기존 `cu124` 안내 대신 `cu130`을 사용합니다.
+`nvidia-smi`의 CUDA 표시는 드라이버 지원 정보이며, 가상환경에 설치한 PyTorch의 CUDA 버전과 다를 수 있습니다.
+일반적인 PyTorch wheel 실행에는 CUDA Toolkit/cuDNN을 별도로 설치하지 않아도 됩니다.
+공식 배포 파일: [PyTorch CUDA 13.0](https://download.pytorch.org/whl/cu130/torch/),
+[torchvision CUDA 13.0](https://download.pytorch.org/whl/cu130/torchvision/),
+[Blackwell 및 드라이버 안내](https://pytorch.org/blog/pytorch-2-12-release-blog/).
+
+**설치 상태:** 아래는 설치 절차입니다. 현재 Python 3.10.11만 확인했으며, Python 3.12 및 PyTorch 설치와 GPU 연산 검증은 아직 완료하지 않았습니다.
+
+1. Python 3.12 64-bit를 준비합니다. 공식 Windows 설치 프로그램은
+   [Python 3.12.10](https://www.python.org/downloads/release/python-31210/)에서 받을 수 있습니다.
+   이미 3.12가 설치되어 있다면 해당 실행 파일을 사용하면 됩니다.
+2. PowerShell에서 `03 AD_Git` 폴더를 열고 다음 명령을 순서대로 실행합니다.
+   `py -3.12`를 찾지 못하면 첫 줄의 실행 파일을 설치된 Python 3.12의 절대 경로로 지정합니다.
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r .hardware_requirements/gpu_requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r .hardware_requirements/common_requirements.txt
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe scripts/check_environment.py --device cuda
+```
+
+GPU/CPU별 파일은 PyTorch 전용 저장소를 사용하고, 공통 패키지는 별도 명령으로 PyPI에서 설치합니다.
+기존 요구사항의 비전 패키지는 `common_requirements.txt`로 옮겼으며, 실제 코드가 사용하는
+NumPy, pandas, matplotlib, scikit-learn, tqdm과 Jupyter 관련 패키지를 추가했습니다.
+CPU만 사용할 경우 별도 `.venv-cpu`를 만들고 `cpu_requirements.txt`를 사용한 뒤 `--device cpu`로 검증합니다.
+
+`check_environment.py`는 데이터 다운로드 없이 난수 이미지로 기존 Autoencoder와 CNN의
+순전파, 역전파, optimizer 갱신을 검사합니다. CUDA 모드에서는 GPU를 사용할 수 없으면 실패합니다.
+이 검사는 환경 확인용이며, 실제 데이터 학습 성능이나 최종 모델의 VRAM 사용량을 보장하지 않습니다.
+설치에 성공하면 다음 명령으로 정확한 패키지 버전을 기록할 수 있습니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip freeze | Out-File -Encoding utf8 .hardware_requirements/windows-gpu.lock.txt
+```
+
+재설치는 GPU 패키지를 위 절차대로 설치한 뒤 `windows-gpu.lock.txt`를 사용합니다.
+이 lock 파일은 해당 Windows/Python/GPU 환경용입니다.
+
+VS Code에서 `Python: Select Interpreter`로 `.venv\Scripts\python.exe`를 선택하고,
+노트북의 커널도 같은 가상환경으로 선택합니다. Jupyter Lab 실행은 다음과 같습니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m jupyter lab
+```
+
+가상환경 활성화 없이 위처럼 실행 파일을 직접 지정할 수 있습니다.
+로컬 학습 파이프라인 실행 전에는 `src/main.py`와 `src/data.py`의 `/workspace` 고정 경로,
+`src/trainer.py`의 무조건적인 `model.compile()` 호출을 Windows 환경에 맞게 조정해야 합니다.
+초기 환경 검증 스크립트는 이 학습 파이프라인을 호출하지 않습니다.
+
+### Docker / Dev Containers
+
 로컬 환경의 충돌을 막기 위해 **Docker 및 VS Code Dev Containers** 사용을 권장합니다.
 (기반 이미지: `nvcr.io/nvidia/pytorch:26.09-py3`)
 
