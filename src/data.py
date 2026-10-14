@@ -1,25 +1,31 @@
+from pathlib import Path
+
 import torch
 from torchvision import transforms
 from torchvision.datasets import FashionMNIST
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Subset
 
-ROOT_DIR = "/workspace/dataset/"
-SELECT_NORMAL = 2 # Set 2 class as normal samples. 
+ROOT_DIR = Path(__file__).resolve().parents[2] / "02 Fashion MNIST 데이터셋"
+SELECT_NORMAL = 2  # Pullover
+
 
 def load_dataset(root=ROOT_DIR, transform=transforms.ToTensor()):
+    """Load local data: train on class 2 and evaluate on classes 0, 2, 4, 6."""
+    train_full = FashionMNIST(
+        root=root, train=True, download=False, transform=transform
+    )
+    test_full = FashionMNIST(
+        root=root, train=False, download=False, transform=transform
+    )
 
-    trainset = FashionMNIST(root=root, train=True, download=True, transform=transform) 
-    testset = FashionMNIST(root=root, train=False, download=True, transform=transform)
+    train_indices = torch.where(train_full.targets == SELECT_NORMAL)[0].tolist()
+    test_classes = torch.tensor([0, 2, 4, 6])
+    test_indices = torch.where(torch.isin(test_full.targets, test_classes))[0].tolist()
 
-    trainset.data = trainset.data[trainset.targets==SELECT_NORMAL] 
-    trainset.targets = trainset.targets[trainset.targets==SELECT_NORMAL]
+    train_set = Subset(train_full, train_indices)
+    test_set = Subset(test_full, test_indices)
+    return train_set, test_set
 
-    test_label = [0,2,4,6] # Define anomaly class 
-    actual_testdata = torch.isin(testset.targets, torch.tensor(test_label)) 
-    testset.data = testset.data[actual_testdata] 
-    testset.targets = testset.targets[actual_testdata]
-    
-    return trainset, testset
 
 def get_loaders(train_set, test_set, batch_size, num_workers):
 
@@ -29,8 +35,5 @@ def get_loaders(train_set, test_set, batch_size, num_workers):
     return train_loader, test_loader
 
 if __name__ == "__main__":
-    train_set, test_set =  load_dataset()
+    train_set, test_set = load_dataset()
     print(f"# of train samples: {len(train_set)}, # of test samples: {len(test_set)}")
-
-    train_loader, test_loader = get_loaders(train_set, test_set, batch_size= 32, num_workers=12)
-    print(f"# of train minibathces: {len(train_loader)}, # of test minibatches: {len(test_loader)}")
