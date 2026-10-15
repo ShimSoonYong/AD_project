@@ -1,6 +1,5 @@
 import os
 
-os.chdir("/workspace")
 print("Running main.py in", os.getcwd())
 
 from argparse import ArgumentParser, Namespace
@@ -11,14 +10,14 @@ from utils import Scorer
 from torch import nn, optim
 import models
 import torch
-
+import data
 
 def get_args():
     parser = ArgumentParser()
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["Autoencoder"],
+        default=["CAE"],
         help="A list of models to train and evaluate",
     )
     parser.add_argument(
@@ -40,12 +39,12 @@ def get_args():
         help="Optimizer to Update parameters",
     )
     parser.add_argument(
-        "--lr", type=float, default=1e-4, help="Learning rate to pass optimizer"
+        "--lr", type=float, default=1e-3, help="Learning rate to pass optimizer"
     )
     parser.add_argument(
         "--epochs",
         type=int,
-        default=100,
+        default=30,
         help="Number of epochs to run, default is 100",
     )
     parser.add_argument(
@@ -64,7 +63,7 @@ def get_args():
     parser.add_argument(
         "--data_root",
         type=str,
-        default="dataset",
+        default=str(data.ROOT_DIR),
         help="Root directory to store FashionMNIST dataset. Default is 'dataset'",
     )
     parser.add_argument(
@@ -121,13 +120,12 @@ def main(args: Namespace):
     print(f"Running on {args.device}")
 
     print("Setting directories")
-    os.makedirs(args.data_root, mode=751, exist_ok=True)
     os.makedirs(args.log_dir, mode=751, exist_ok=True)
 
     print("Get data loaders")
-    train_set, test_set = load_dataset(root=args.data_root, transform=augmentations)
-    train_loader, test_loader = get_loaders(
-        train_set, test_set, args.batch_size, args.num_workers
+    train_set, val_set, test_set = load_dataset(root=args.data_root, transform=augmentations)
+    train_loader, val_loader, test_loader = get_loaders(
+        train_set, val_set, test_set, args.batch_size, args.num_workers
     )
 
     for model, name in zip(model_list, args.models):
@@ -152,7 +150,7 @@ def main(args: Namespace):
             model=model,
             epochs=args.epochs,
             train_loader=train_loader,
-            test_loader=test_loader,
+            val_loader=val_loader,
             criterion=criterion,
             optimizer=optimizer,
             scorer=scorer,
@@ -162,10 +160,16 @@ def main(args: Namespace):
         print("Fitting trainer")
         trained_model = trainer.fit()
 
+        print("Evaluating model")
+        scorer.collect_record(args.epochs)
+        scorer.plot_auc(args.epochs)
+        scorer.plot_score(args.epochs)
+        scorer.save_record(args.epochs)
+
         print("Saving model")
         save_path = args.log_dir + f"/{name}/checkpoint"
         os.makedirs(save_path, mode=751, exist_ok=True)
-        torch.save(trained_model.state_dict(), save_path + "/final_{name}_weight.pth")
+        torch.save(trained_model.state_dict(), save_path + f"/final_{name}_weight.pth")
         print(f"Final trained model saved at {save_path}")
 
 

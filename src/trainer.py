@@ -12,7 +12,7 @@ class Trainer:
         model: nn.Module,
         epochs: int,
         train_loader: DataLoader,
-        test_loader: DataLoader,
+        val_loader: DataLoader,
         criterion: nn.Module,
         optimizer: optim.Optimizer,
         scorer: Scorer,
@@ -20,10 +20,9 @@ class Trainer:
     ):
 
         self.model = model
-        self.model.compile()
         self.epochs = epochs
         self.train_loader = train_loader
-        self.test_loader = test_loader
+        self.val_loader = val_loader
         self.criterion = criterion
         self.optimizer = optimizer
         self.scorer = scorer
@@ -60,7 +59,7 @@ class Trainer:
 
         loss = torch.tensor(0)
         pbar = tqdm(
-            self.test_loader,
+            self.val_loader,
             desc=f"{epoch} Epoch validation:",
             postfix={"Loss": loss.item()},
             leave=False,
@@ -73,11 +72,6 @@ class Trainer:
             loss = self.criterion(decoded, x)
 
             pbar.set_postfix({"Loss": loss.item()})
-
-        self.scorer.collect_record(epoch)
-        self.scorer.plot_auc(epoch)
-        self.scorer.plot_score(epoch)
-        self.scorer.save_record(epoch)
 
     def fit(self):
         print(f"Model fitting for {self.epochs}")
