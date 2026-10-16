@@ -17,7 +17,7 @@ def get_args():
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["CAE"],
+        default=["MemAE"],
         help="A list of models to train and evaluate",
     )
     parser.add_argument(
@@ -133,7 +133,7 @@ def main(args: Namespace):
         criterion = criterion_class()
         optimizer = optimizer_class(model.parameters(), lr=args.lr)
 
-        log_path = args.log_dir + "/" + name
+        log_path = args.log_dir + "/"
         os.makedirs(log_path, mode=751, exist_ok=True)
         print("Initializing Scorer")
         scorer = Scorer(
@@ -167,7 +167,7 @@ def main(args: Namespace):
         scorer.save_record(args.epochs)
 
         print("Saving model")
-        save_path = args.log_dir + f"/{name}/checkpoint"
+        save_path = args.log_dir
         os.makedirs(save_path, mode=751, exist_ok=True)
         torch.save(trained_model.state_dict(), save_path + f"/final_{name}_weight.pth")
         print(f"Final trained model saved at {save_path}")

@@ -1,3 +1,5 @@
+import csv
+
 import torch
 from tqdm import tqdm
 from utils import Scorer
@@ -32,6 +34,8 @@ class Trainer:
         print(f"{epoch} epoch Training starts")
 
         loss = torch.tensor(0)
+        total_loss = 0.0
+        total_samples = 0
         pbar = tqdm(
             self.train_loader,
             desc=f"{epoch} Epoch training:",
@@ -48,7 +52,12 @@ class Trainer:
             loss.backward()
             self.optimizer.step()
             self.scorer.visualize_IO(epoch, x)
-            pbar.set_postfix({"Loss": loss.item()})
+            batch_loss = loss.item()
+            total_loss += batch_loss * x.size(0)
+            total_samples += x.size(0)
+            pbar.set_postfix({"Loss": batch_loss})
+
+        return total_loss / total_samples
 
     @torch.inference_mode()
     def validate(self, epoch: int):
@@ -56,6 +65,8 @@ class Trainer:
         print(f"{epoch} epoch Validation starts")
 
         loss = torch.tensor(0)
+        total_loss = 0.0
+        total_samples = 0
         pbar = tqdm(
             self.val_loader,
             desc=f"{epoch} Epoch validation:",
@@ -69,15 +80,35 @@ class Trainer:
 
             loss = self.criterion(decoded, x)
 
-            pbar.set_postfix({"Loss": loss.item()})
+            batch_loss = loss.item()
+            total_loss += batch_loss * x.size(0)
+            total_samples += x.size(0)
+            pbar.set_postfix({"Loss": batch_loss})
+
+        return total_loss / total_samples
 
     def fit(self):
         print(f"Model fitting for {self.epochs}")
 
-        pbar = tqdm(range(1, self.epochs + 1), desc="Fitting:", leave=False)
-        for epoch in pbar:
-            self.train(epoch)
-            self.validate(epoch)
+        with open(
+            f"{self.scorer.LOG_DIR}/loss_history.csv",
+            "w",
+            newline="",
+            encoding="utf-8",
+        ) as loss_file:
+            writer = csv.writer(loss_file)
+            writer.writerow(["epoch", "train_loss", "val_loss"])
+
+            pbar = tqdm(range(1, self.epochs + 1), desc="Fitting:", leave=False)
+            for epoch in pbar:
+                train_loss = self.train(epoch)
+                val_loss = self.validate(epoch)
+                writer.writerow([epoch, train_loss, val_loss])
+                loss_file.flush()
+                tqdm.write(
+                    f"Epoch {epoch}/{self.epochs} - "
+                    f"train_loss: {train_loss:.6f}, val_loss: {val_loss:.6f}"
+                )
         print("Fitting complete")
 
         return self.model
