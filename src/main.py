@@ -5,7 +5,7 @@ print("Running main.py in", os.getcwd())
 from argparse import ArgumentParser, Namespace
 from data import load_dataset, get_loaders
 from torchvision import transforms
-from trainer import Trainer
+from trainer import SSIMLoss, Trainer
 from utils import Scorer
 from torch import nn, optim
 import models
@@ -27,10 +27,17 @@ def get_args():
         help="Loss Threshold to classify anomalies",
     )
     parser.add_argument(
+        "--train_criterion",
         "--criterion",
         type=str,
-        default="MSELoss",
-        help="Criterion(Loss) to train model",
+        default="SSIMLoss",
+        help="Reconstruction loss for training and validation",
+    )
+    parser.add_argument(
+        "--score_criterion",
+        type=str,
+        default="SSIMLoss",
+        help="Reconstruction error for evaluation anomaly scores",
     )
     parser.add_argument(
         "--optimizer",
@@ -39,12 +46,12 @@ def get_args():
         help="Optimizer to Update parameters",
     )
     parser.add_argument(
-        "--lr", type=float, default=1e-3, help="Learning rate to pass optimizer"
+        "--lr", type=float, default=1e-4, help="Learning rate to pass optimizer"
     )
     parser.add_argument(
         "--epochs",
         type=int,
-        default=50,
+        default=200,
         help="Number of epochs to run, default is 100",
     )
     parser.add_argument(
@@ -75,7 +82,7 @@ def get_args():
     parser.add_argument(
         "--num_workers",
         type=int,
-        default=4,
+        default=0,
         help="num_workers param in PyTorch DataLoader",
     )
 
@@ -105,10 +112,23 @@ def main(args: Namespace):
         print(f"Please check {args.models} exist at models.py script.")
 
     try:
-        criterion_class = getattr(nn, args.criterion)
+        train_criterion_class = (
+            SSIMLoss
+            if args.train_criterion == "SSIMLoss"
+            else getattr(nn, args.train_criterion)
+        )
+        score_criterion_class = (
+            SSIMLoss
+            if args.score_criterion == "SSIMLoss"
+            else getattr(nn, args.score_criterion)
+        )
     except AttributeError as e:
         print(e)
-        print(f"Please check {args.criterion} exist at PyTorch loss functions")
+        print(
+            f"Please check {args.train_criterion} and {args.score_criterion} "
+            "are PyTorch loss functions or SSIMLoss"
+        )
+        raise
 
     try:
         optimizer_class = getattr(optim, args.optimizer)
@@ -130,7 +150,8 @@ def main(args: Namespace):
 
     for model, name in zip(model_list, args.models):
         model = model().to(device=device)
-        criterion = criterion_class()
+        train_criterion = train_criterion_class().to(device)
+        score_criterion = score_criterion_class().to(device)
         optimizer = optimizer_class(model.parameters(), lr=args.lr)
 
         log_path = args.log_dir + "/"
@@ -140,7 +161,7 @@ def main(args: Namespace):
             model=model,
             loader=test_loader,
             threshold=args.threshold,
-            criterion=criterion,
+            criterion=score_criterion,
             log_dir=log_path,
             device=device,
         )
@@ -151,7 +172,7 @@ def main(args: Namespace):
             epochs=args.epochs,
             train_loader=train_loader,
             val_loader=val_loader,
-            criterion=criterion,
+            criterion=train_criterion,
             optimizer=optimizer,
             scorer=scorer,
             device=device,

@@ -2,63 +2,10 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-
-# basic autoencoder
-class Autoencoder(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-        self.encoder = nn.Sequential(
-            nn.Linear(28 * 28, 128),
-            nn.ReLU(),
-            nn.Linear(128, 2),
-        )
-
-        self.decoder = nn.Sequential(
-            nn.Linear(2, 128),
-            nn.ReLU(),
-            nn.Linear(128, 28 * 28),
-            nn.Sigmoid(),
-        )
-
-    def forward(self, x):
-        x = x.view(-1, 28 * 28)
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
-        decoded = decoded.view(-1, 1, 28, 28)
-
-        return decoded
-
-
-class CNN(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-        self.encoder = nn.Sequential(
-            nn.Conv2d(1, 4, 3, 2, 1),
-            nn.ReLU(),
-            nn.BatchNorm2d(4),
-            nn.Conv2d(4, 8, 3, 2, 1),
-        )
-
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(8, 4, 3, 2, 1, 1),
-            nn.ReLU(),
-            nn.BatchNorm2d(4),
-            nn.ConvTranspose2d(4, 1, 3, 2, 1, 1),
-        )
-
-    def forward(self, x):
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
-
-        return decoded
-
-
 class CAE(nn.Module):
     """Reconstruct [batch, 1, 28, 28] images through a compact latent vector."""
 
-    def __init__(self, latent_dim=16):
+    def __init__(self, latent_dim=8):
         super().__init__()
 
         self.encoder = nn.Sequential(
@@ -90,7 +37,7 @@ class MemoryModule(nn.Module):
     Sparse addressing follows https://arxiv.org/abs/1904.02639, Section 3.3.
     """
 
-    def __init__(self, latent_dim, memory_size=100, shrink_threshold=None):
+    def __init__(self, latent_dim, memory_size, shrink_threshold=None):
         super().__init__()
 
         if latent_dim < 1 or memory_size < 1:
@@ -127,7 +74,7 @@ class MemoryModule(nn.Module):
 class MemAE(nn.Module):
     """Reconstruct [batch, 1, 28, 28] images using retrieved memory vectors."""
 
-    def __init__(self, latent_dim=16, memory_size=100, shrink_threshold=None):
+    def __init__(self, latent_dim=8, memory_size=50, shrink_threshold=None):
         super().__init__()
 
         self.encoder = nn.Sequential(
