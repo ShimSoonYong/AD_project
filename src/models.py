@@ -151,10 +151,13 @@ class MemAE(nn.Module):
             nn.Sigmoid(),
         )
 
-    def forward(self, x):
+    def forward(self, x, return_attention=False):
         encoded = self.encoder(x)
-        retrieved, _ = self.memory(encoded)
-        return self.decoder(retrieved)
+        retrieved, attention = self.memory(encoded)
+        decoded = self.decoder(retrieved)
+        if return_attention:
+            return decoded, attention
+        return decoded
 
 
 if __name__ == "__main__":

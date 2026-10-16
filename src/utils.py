@@ -34,10 +34,22 @@ class Scorer:
     @torch.inference_mode()
     def visualize_IO(self, epoch: int, samples: torch.Tensor, num_samples: int = 4):
 
-        _, ax = plt.subplots(2, num_samples, figsize=(num_samples, 2))
+        num_samples = min(num_samples, samples.size(0))
+        samples = samples[:num_samples]
+
+        was_training = self.model.training
+        self.model.eval()
+        try:
+            decoded = self.model(samples)
+        finally:
+            self.model.train(was_training)
+
+        samples = samples.cpu().numpy()
+        decoded = decoded.cpu().numpy()
+        _, ax = plt.subplots(2, num_samples, figsize=(num_samples, 2), squeeze=False)
 
         for i in range(num_samples):
-            img = samples.cpu().data.numpy()[i].reshape(28, 28, -1)
+            img = samples[i].reshape(28, 28, -1)
             ax[0][i].imshow(img, cmap="gray")
             ax[0][i].set_xticks(())
             ax[0][i].set_yticks(())
@@ -45,9 +57,8 @@ class Scorer:
             if i == 0:
                 ax[0][i].set_ylabel("Input")
 
-        decoded = self.model(samples)
         for i in range(num_samples):
-            img = decoded.cpu().data.numpy()[i].reshape(28, 28, -1)
+            img = decoded[i].reshape(28, 28, -1)
             ax[1][i].imshow(img, cmap="gray")
             ax[1][i].set_xticks(())
             ax[1][i].set_yticks(())

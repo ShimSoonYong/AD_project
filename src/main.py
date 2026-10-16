@@ -44,7 +44,7 @@ def get_args():
     parser.add_argument(
         "--epochs",
         type=int,
-        default=30,
+        default=50,
         help="Number of epochs to run, default is 100",
     )
     parser.add_argument(
