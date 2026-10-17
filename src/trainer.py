@@ -1,6 +1,10 @@
 import csv
+import math
+from pathlib import Path
 
+import numpy as np
 import torch
+from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
 from utils import Scorer
 from models import MemAE
@@ -42,6 +46,24 @@ class SSIMLoss(nn.Module):
         return 1 - (numerator / denominator).mean()
 
 
+def memory_auxiliary_losses(encoded, memory_weight, margin=0.2):
+    """Pull normalized queries toward their nearest detached memory prototype."""
+    if memory_weight.size(0) < 2:
+        raise ValueError("Memory auxiliary losses require at least two memory vectors")
+    if not math.isfinite(margin) or margin <= 0:
+        raise ValueError("memory_margin must be positive and finite")
+
+    queries = F.normalize(encoded, dim=1)
+    prototypes = F.normalize(memory_weight.detach(), dim=1)
+    nearest = (queries @ prototypes.T).topk(2, dim=1).indices
+    positive, negative = prototypes[nearest[:, 0]], prototypes[nearest[:, 1]]
+    compactness = F.mse_loss(queries, positive)
+    separateness = F.triplet_margin_loss(
+        queries, positive, negative, margin=margin, p=2, eps=1e-6, reduction="mean"
+    )
+    return compactness, separateness
+
+
 class Trainer:
     def __init__(
         self,
@@ -54,10 +76,25 @@ class Trainer:
         scorer: Scorer,
         device: torch.device,
         entropy_weight: float = 0.0001,
+        compactness_weight: float = 0.0,
+        separateness_weight: float = 0.0,
+        memory_margin: float = 0.2,
     ):
 
-        if entropy_weight < 0:
-            raise ValueError("entropy_weight must be non-negative")
+        for name, weight in (
+            ("entropy_weight", entropy_weight),
+            ("compactness_weight", compactness_weight),
+            ("separateness_weight", separateness_weight),
+        ):
+            if not math.isfinite(weight) or weight < 0:
+                raise ValueError(f"{name} must be non-negative and finite")
+        if not math.isfinite(memory_margin) or memory_margin <= 0:
+            raise ValueError("memory_margin must be positive and finite")
+        if compactness_weight > 0 or separateness_weight > 0:
+            if not isinstance(model, MemAE):
+                raise ValueError("Memory auxiliary losses require a MemAE model")
+            if model.memory.weight.size(0) < 2:
+                raise ValueError("Memory auxiliary losses require at least two memory vectors")
 
         self.model = model
         self.epochs = epochs
@@ -68,9 +105,24 @@ class Trainer:
         self.scorer = scorer
         self.device = device
         self.entropy_weight = entropy_weight
+        self.compactness_weight = compactness_weight
+        self.separateness_weight = separateness_weight
+        self.memory_margin = memory_margin
 
     def _compute_loss(self, x):
         """Use the same objective for training and validation."""
+        if self.compactness_weight > 0 or self.separateness_weight > 0:
+            decoded, attention, encoded = self.model(x, return_features=True)
+            compactness, separateness = memory_auxiliary_losses(
+                encoded, self.model.memory.weight, self.memory_margin
+            )
+            loss = self.criterion(decoded, x)
+            if self.entropy_weight > 0:
+                entropy_loss = -(attention * attention.clamp_min(1e-12).log()).sum(dim=1).mean()
+                loss = loss + self.entropy_weight * entropy_loss
+            return (loss + self.compactness_weight * compactness
+                    + self.separateness_weight * separateness)
+
         if isinstance(self.model, MemAE) and self.entropy_weight > 0:
             decoded, attention = self.model(x, return_attention=True)
             # Sum over memory slots, then average over the batch; avoid log(0).
@@ -163,4 +215,120 @@ class Trainer:
 
         print("Fitting complete")
 
+        return self.model
+
+
+class FeatureTrainer:
+    """Train cached feature reconstruction with run126's validation selection."""
+
+    def __init__(
+        self, model, epochs, features, optimizer, scorer, device,
+        batch_size=64, entropy_weight=1.3e-6, seed=42, patience=80,
+    ):
+        if epochs < 1 or batch_size < 1 or patience < 0:
+            raise ValueError("Require epochs > 0, batch_size > 0, patience >= 0")
+        if not math.isfinite(entropy_weight) or entropy_weight < 0:
+            raise ValueError("entropy_weight must be non-negative and finite")
+        if features["normal_val_count"] != 600:
+            raise ValueError("Feature validation must begin with 600 normal samples")
+        if not torch.all(features["tuning_labels"][:600] == 2):
+            raise ValueError("The first 600 validation labels must be class 2")
+
+        self.model, self.optimizer, self.scorer = model, optimizer, scorer
+        self.device = torch.device(device)
+        self.epochs, self.batch_size = epochs, batch_size
+        self.entropy_weight, self.seed, self.patience = entropy_weight, seed, patience
+        self.train_x = features["train_x"].to(self.device)
+        self.tuning_x = features["tuning_x"].to(self.device)
+        self.tuning_labels = features["tuning_labels"].cpu().numpy()
+        self.best_epoch = self.completed_epochs = 0
+        self.selected_validation = self.tuning_scores = self.final_validation = None
+        self.history = []
+
+    def _loss_terms(self, batch):
+        decoded, attention = self.model(batch, return_attention=True)
+        reconstruction = (decoded - batch).square().mean()
+        entropy = -(attention * attention.clamp_min(1e-12).log()).sum(1).mean()
+        return torch.stack((
+            reconstruction + self.entropy_weight * entropy, reconstruction, entropy,
+        ))
+
+    @torch.inference_mode()
+    def evaluate(self, features, labels, batch_size=256):
+        self.model.eval()
+        features = features.to(self.device)
+        labels = labels.cpu().numpy() if isinstance(labels, torch.Tensor) else np.asarray(labels)
+        values = [(self.model(batch) - batch).square().mean(1)
+                  for batch in features.split(batch_size)]
+        scores = torch.cat(values).cpu().numpy()
+        if not np.isfinite(scores).all():
+            raise ValueError("Non-finite feature reconstruction scores")
+        metrics = {"auroc": float(roc_auc_score(labels != 2, scores))}
+        for label in (0, 4, 6):
+            selected = np.isin(labels, (2, label))
+            metrics[f"class_{label}_vs_2"] = float(
+                roc_auc_score(labels[selected] != 2, scores[selected])
+            )
+        return metrics, scores
+
+    @torch.inference_mode()
+    def _normal_validation(self):
+        self.model.eval()
+        total = torch.zeros(3, device=self.device)
+        for batch in self.tuning_x[:600].split(self.batch_size):
+            total += self._loss_terms(batch) * len(batch)
+        return (total / 600).tolist()
+
+    def fit(self):
+        run = Path(self.scorer.LOG_DIR)
+        generator = torch.Generator().manual_seed(self.seed)
+        best_auc, best_state = -1.0, None
+        self.history = []
+        try:
+            for epoch in range(1, self.epochs + 1):
+                self.model.train()
+                total = torch.zeros(3, device=self.device)
+                permutation = torch.randperm(len(self.train_x), generator=generator).to(self.device)
+                for indices in permutation.split(self.batch_size):
+                    batch = self.train_x[indices]
+                    self.optimizer.zero_grad(set_to_none=True)
+                    terms = self._loss_terms(batch)
+                    terms[0].backward()
+                    self.optimizer.step()
+                    total += terms.detach() * len(batch)
+                self.completed_epochs = epoch
+                training = (total / len(self.train_x)).tolist()
+                validation_loss = self._normal_validation()
+                if not np.isfinite(training + validation_loss).all():
+                    raise ValueError("Non-finite feature training or validation loss")
+                validation, _ = self.evaluate(self.tuning_x, self.tuning_labels)
+                if validation["auroc"] > best_auc:
+                    best_auc, self.best_epoch = validation["auroc"], epoch
+                    best_state = {key: value.detach().cpu().clone()
+                                  for key, value in self.model.state_dict().items()}
+                    torch.save(best_state, run / "best_MemAE_weight.pth")
+                self.history.append({
+                    "epoch": epoch, "train_loss": training[0], "val_loss": validation_loss[0],
+                    "tuning_auroc": validation["auroc"],
+                    "train_reconstruction": training[1], "val_reconstruction": validation_loss[1],
+                    "train_entropy": training[2], "val_entropy": validation_loss[2],
+                })
+                tqdm.write(f"Epoch {epoch}/{self.epochs} - train_loss: {training[0]:.8f}, "
+                           f"val_loss: {validation_loss[0]:.8f}, tuning_auroc: {validation['auroc']:.6f}")
+                if epoch >= 100 and epoch - self.best_epoch >= self.patience:
+                    break
+            if best_state is None:
+                raise RuntimeError("No feature checkpoint was selected")
+            torch.save(self.model.state_dict(), run / "final_MemAE_weight.pth")
+            self.final_validation, _ = self.evaluate(self.tuning_x, self.tuning_labels)
+            self.model.load_state_dict(best_state)
+            self.selected_validation, self.tuning_scores = self.evaluate(self.tuning_x, self.tuning_labels)
+        finally:
+            with (run / "loss_history.csv").open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=[
+                    "epoch", "train_loss", "val_loss", "tuning_auroc",
+                    "train_reconstruction", "val_reconstruction", "train_entropy", "val_entropy",
+                ])
+                writer.writeheader()
+                writer.writerows(self.history)
         return self.model
