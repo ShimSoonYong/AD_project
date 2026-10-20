@@ -58,6 +58,8 @@ def get_args():
     parser.add_argument("--memory_margin", type=float, default=0.2,
                         help="Margin between the two nearest normalized memory vectors")
     parser.add_argument("--entropy_weight", type=float, default=1.3e-6)
+    parser.add_argument("--kl_weight", type=float, default=1e-5,
+                        help="FeatureVAE KL weight; KL sums latent dimensions and averages samples")
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--latent_dim", type=int, default=64)
     parser.add_argument("--hidden_dim", type=int, default=256)
@@ -73,7 +75,7 @@ def get_args():
         "--epochs",
         type=int,
         default=400,
-        help="Maximum epochs; FeatureMemAE selects the best validation AUROC",
+        help="Maximum epochs; feature models select the best validation AUROC",
     )
     parser.add_argument(
         "--augment",
@@ -98,7 +100,7 @@ def get_args():
         "--log_dir",
         type=str,
         default=str(Path(__file__).resolve().parents[1] / "logs"),
-        help="Root directory for logs; FeatureMemAE uses MemAE/run_n",
+        help="Root directory for logs; FeatureVAE uses DINOVAE/run_n, FeatureMemAE uses MemAE/run_n",
     )
     parser.add_argument(
         "--num_workers",
@@ -112,10 +114,12 @@ def get_args():
 
 
 def train_feature_model(args: Namespace):
-    """Run the frozen DINOv2 + FeatureMemAE configuration selected in run_126."""
+    """Compare feature reconstruction heads on the same frozen DINOv2 features."""
     import matplotlib
 
     matplotlib.use("Agg")  # Save plots without requiring a desktop GUI backend.
+    model_name = args.models[0]
+    is_vae = model_name == "FeatureVAE"
     if args.train_criterion != "MSELoss" or args.score_criterion != "MSELoss":
         raise ValueError("The DINOv2 configuration uses feature MSE for training and scoring")
     if args.compactness_weight or args.separateness_weight or args.augment is not None:
@@ -136,16 +140,21 @@ def train_feature_model(args: Namespace):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cuda.matmul.allow_tf32 = False
-    model = models.FeatureMemAE(
-        input_dim=384, hidden_dim=args.hidden_dim, latent_dim=args.latent_dim,
-        memory_size=args.memory_size, shrink_threshold=args.shrink_threshold,
-        temperature=args.temperature,
-    ).to(device)
+    if is_vae:
+        model = models.FeatureVAE(
+            input_dim=384, hidden_dim=args.hidden_dim, latent_dim=args.latent_dim,
+        ).to(device)
+    else:
+        model = models.FeatureMemAE(
+            input_dim=384, hidden_dim=args.hidden_dim, latent_dim=args.latent_dim,
+            memory_size=args.memory_size, shrink_threshold=args.shrink_threshold,
+            temperature=args.temperature,
+        ).to(device)
     optimizer = getattr(optim, args.optimizer)(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay,
     )
 
-    base = Path(args.log_dir) / "MemAE"
+    base = Path(args.log_dir) / ("DINOVAE" if is_vae else "MemAE")
     base.mkdir(parents=True, exist_ok=True)
     number = max((int(p.name[4:]) for p in base.glob("run_*")
                   if p.is_dir() and p.name[4:].isdigit()), default=0) + 1
@@ -156,18 +165,28 @@ def train_feature_model(args: Namespace):
             break
         except FileExistsError:
             number += 1
-    print(f"Frozen DINOv2 + FeatureMemAE: {run}", flush=True)
+    print(f"Frozen DINOv2 + {model_name}: {run}", flush=True)
     config = vars(args) | {
-        "run": run.name, "model": "FeatureMemAE_DINOv2", "input_dim": 384,
+        "run": run.name, "model": f"{model_name}_DINOv2", "input_dim": 384,
         "feature_dim": 384, "hidden": args.hidden_dim, "latent": args.latent_dim,
         "memory": args.memory_size, "batch": args.batch_size, "entropy": args.entropy_weight,
         "feature_backbone": features["metadata"], "data_split_seed": 42,
         "tuning_anomaly_seed": 1337, "eval_every": 1, "early_stopping_min_epoch": 100,
         "checkpoint_selection": "maximum AUROC on fixed labeled tuning validation",
-        "checkpoint_note": "Trainable FeatureMemAE only; DINOv2 weights remain frozen",
+        "checkpoint_note": f"Trainable {model_name} only; DINOv2 weights remain frozen",
         "cudnn_deterministic": True, "cudnn_allow_tf32": True, "matmul_allow_tf32": False,
         "torch_version": str(torch.__version__),
     }
+    if is_vae:
+        config.update(
+            entropy_weight=0.0, entropy=0.0, memory_size=None, memory=None,
+            temperature=None, shrink_threshold=None,
+            kl_reduction="sum latent dimensions, then mean over batch",
+            reconstruction_reduction="mean over features and batch",
+            training_latent="one reparameterized sample per input",
+            evaluation_latent="posterior mean (z = mu)",
+            validation_loss="posterior-mean reconstruction MSE + weighted KL; not sampled ELBO",
+        )
     (run / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
     (run / "optimizer_defaults.json").write_text(
         json.dumps(optimizer.defaults, indent=2), encoding="utf-8")
@@ -180,8 +199,8 @@ def train_feature_model(args: Namespace):
     scorer = Scorer(model, [], args.threshold, nn.MSELoss(), str(run), device)
     trainer = FeatureTrainer(
         model, args.epochs, features, optimizer, scorer, device,
-        batch_size=args.batch_size, entropy_weight=args.entropy_weight,
-        seed=args.seed, patience=args.patience,
+        batch_size=args.batch_size, entropy_weight=0.0 if is_vae else args.entropy_weight,
+        seed=args.seed, patience=args.patience, kl_weight=args.kl_weight,
     )
     trainer.fit()
     test_metrics, test_scores = trainer.evaluate(
@@ -213,7 +232,7 @@ def train_feature_model(args: Namespace):
         "early_stopped": trainer.completed_epochs < args.epochs,
         "selected_validation": trainer.selected_validation, "selected_test": test_metrics,
         "final_validation": trainer.final_validation, "test_evaluated": True,
-        "selected_checkpoint": "best_MemAE_weight.pth", "final_checkpoint": "final_MemAE_weight.pth",
+        "selected_checkpoint": trainer.best_checkpoint, "final_checkpoint": trainer.final_checkpoint,
     }
     (run / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(json.dumps({"run": run.name, **metrics}, indent=2), flush=True)
@@ -221,9 +240,9 @@ def train_feature_model(args: Namespace):
 
 
 def main(args: Namespace):
-    if "FeatureMemAE" in args.models:
-        if args.models != ["FeatureMemAE"]:
-            raise ValueError("Run FeatureMemAE separately from the image reconstruction models")
+    if any(name in ("FeatureMemAE", "FeatureVAE") for name in args.models):
+        if len(args.models) != 1:
+            raise ValueError("Run one feature model at a time")
         return train_feature_model(args)
     if args.augment == None:
         augmentations = transforms.ToTensor()

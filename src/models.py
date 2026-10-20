@@ -125,9 +125,9 @@ class DINOv2Backbone(nn.Module):
 
     def __init__(self, source_dir=None, weights_path=None):
         super().__init__()
-        assets = Path(__file__).resolve().parents[1] / "logs" / "MemAE" / "_tuning"
-        source = Path(source_dir or assets / "dinov2_source").resolve()
-        weights = Path(weights_path or assets / "weights" / "dinov2_vits14_pretrain.pth").resolve()
+        assets = Path(__file__).resolve().parent
+        source = Path(source_dir or assets / "backbones").resolve()
+        weights = Path(weights_path or assets / "backbone_weights" / "dinov2_vits14_pretrain.pth").resolve()
         if not (source / "dinov2" / "hub" / "backbones.py").is_file():
             raise FileNotFoundError(f"Local official DINOv2 source is missing: {source}")
         with weights.open("rb") as handle:
@@ -191,6 +191,31 @@ class FeatureMemAE(nn.Module):
             return decoded, attention, encoded
         if return_attention:
             return decoded, attention
+        return decoded
+
+
+class FeatureVAE(nn.Module):
+    """Reconstruct frozen features using a diagonal Gaussian latent distribution."""
+
+    def __init__(self, input_dim=384, hidden_dim=256, latent_dim=64):
+        super().__init__()
+        if min(input_dim, hidden_dim, latent_dim) < 1:
+            raise ValueError("input_dim, hidden_dim and latent_dim must be positive")
+        self.encoder = nn.Sequential(nn.Linear(input_dim, hidden_dim), nn.ReLU())
+        self.mu = nn.Linear(hidden_dim, latent_dim)
+        self.logvar = nn.Linear(hidden_dim, latent_dim)
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, input_dim),
+        )
+
+    def forward(self, x, return_distribution=False):
+        encoded = self.encoder(x)
+        mu, logvar = self.mu(encoded), self.logvar(encoded)
+        z = mu + (0.5 * logvar).exp() * torch.randn_like(mu) if self.training else mu
+        decoded = self.decoder(z)
+        if return_distribution:
+            return decoded, mu, logvar
         return decoded
 
 
