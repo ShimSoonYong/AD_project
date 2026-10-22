@@ -5,13 +5,10 @@ WORKDIR /workspace
 ENV PYTHONUNBUFFERED=1 \
   DEBIAN_FRONTEND=noninteractive
 
+COPY requirements.txt .
+
 RUN pip install --no-cache-dir \
-  -r requirements.txt \
-  einops \
-  scikit-learn \
-  matplotlib \
-  numpy \
-  pandas
+  -r requirements.txt
 
 EXPOSE 8888
 

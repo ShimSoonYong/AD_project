@@ -228,10 +228,6 @@ class FeatureTrainer:
             raise ValueError("entropy_weight must be non-negative and finite")
         if not math.isfinite(kl_weight) or kl_weight < 0:
             raise ValueError("kl_weight must be non-negative and finite")
-        if features["normal_val_count"] != 600:
-            raise ValueError("Feature validation must begin with 600 normal samples")
-        if not torch.all(features["tuning_labels"][:600] == 2):
-            raise ValueError("The first 600 validation labels must be class 2")
 
         self.model, self.optimizer, self.scorer = model, optimizer, scorer
         self.device = torch.device(device)
@@ -254,7 +250,7 @@ class FeatureTrainer:
     def _loss_terms(self, batch):
         if self.is_vae:
             decoded, mu, logvar = self.model(batch, return_distribution=True)
-            reconstruction = (decoded - batch).square().mean()
+            reconstruction = self.criterion(decoded, batch)
             # Sum over latent dimensions, then average over samples.
             kl = -0.5 * (1 + logvar - mu.square() - logvar.exp()).sum(1).mean()
             return torch.stack(
@@ -262,7 +258,7 @@ class FeatureTrainer:
             )
         decoded, attention = self.model(batch, return_attention=True)
 
-        reconstruction = self.criterion(decoded)
+        reconstruction = self.criterion(decoded, batch)
         entropy = -(attention * attention.clamp_min(1e-12).log()).sum(1).mean()
 
         return torch.stack(

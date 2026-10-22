@@ -11,7 +11,7 @@ from utils import *
 
 def load_dataset(
     root: str = ROOT_DIR,
-    transform: v2.Transform = v2.ToDtype(dtype=torch.float32),
+    transform: v2.Transform = v2.ToTensor(),
     seed: int = 42,
 ):
     trainset = FashionMNIST(root=root, train=True, download=True, transform=transform)
@@ -30,7 +30,7 @@ def load_dataset(
 
     g = get_generator(seed)
     train_idx, val_idx = random_split(
-        dataset=range(len(trainset)), lengths=[0.8, 0.2], generator=g
+        dataset=range(len(trainset)), lengths=[0.9, 0.1], generator=g
     )
 
     trainset = Subset(trainset, train_idx.indices)
@@ -96,7 +96,8 @@ def dinov2_transform():
             v2.Lambda(lambda image: image.convert("RGB")),
             v2.Resize(256, interpolation=v2.InterpolationMode.BICUBIC, antialias=True),
             v2.CenterCrop(224),
-            v2.ToTensor(),
+            v2.ToImage(),
+            v2.ToDtype(torch.float32),
             v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         ]
     )

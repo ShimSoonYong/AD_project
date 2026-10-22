@@ -137,10 +137,10 @@ def get_args():
     return args
 
 
-def run_fmemae(args: Namespace):
+def run_fae(args: Namespace, m: str):
 
     if args.augment == ["none"]:
-        augmentations = v2.ToDtype(torch.float32)
+        augmentations = v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32)])
     elif isinstance(args.augment, list):
         temp = []
         try:
@@ -198,14 +198,21 @@ def run_fmemae(args: Namespace):
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cuda.matmul.allow_tf32 = False
 
-    model = models.FeatureMemAE(
-        input_dim=384,
-        hidden_dim=args.hidden_dim,
-        latent_dim=args.latent_dim,
-        memory_size=args.memory_size,
-        shrink_threshold=args.shrink_threshold,
-        temperature=args.temperature,
-    ).to(device)
+    if m == "FeatureVAE":
+        model = models.FeatureVAE(
+            input_dim=384,
+            hidden_dim=args.hidden_dim,
+            latent_dim=args.latent_dim,
+        ).to(device)
+    elif m == "FeatureMemAE":
+        model = models.FeatureMemAE(
+            input_dim=384,
+            hidden_dim=args.hidden_dim,
+            latent_dim=args.latent_dim,
+            memory_size=args.memory_size,
+            shrink_threshold=args.shrink_threshold,
+            temperature=args.temperature,
+        ).to(device)
 
     optimizer = optimizer_class(
         model.parameters(),
@@ -350,7 +357,7 @@ def main(args: Namespace):
         )
 
     if args.augment == ["none"]:
-        augmentations = v2.ToDtype(torch.float32)
+        augmentations = v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32)])
     elif isinstance(args.augment, list):
         temp = []
         try:
@@ -393,8 +400,11 @@ def main(args: Namespace):
         model_list = []
         for m in args.models:
             if "FeatureMemAE" == m:
-                run_fmemae(args)
+                run_fae(args, m)
                 continue
+            elif "FeatureVAE" == m:
+                run_fae(args, m)
+
             model_list.append(getattr(models, m))
     except AttributeError as e:
         print(e)
