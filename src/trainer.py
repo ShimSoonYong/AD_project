@@ -6,7 +6,7 @@ import torch
 from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
 from utils import *
-from models import MemAE
+from models import FeatureVAE, MemAE
 from torch import nn, optim
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
@@ -220,11 +220,14 @@ class FeatureTrainer:
         entropy_weight: float = 1.3e-6,
         seed: int = 42,
         patience: int = 80,
+        kl_weight=1e-5,
     ):
         if epochs < 1 or batch_size < 1 or patience < 0:
             raise ValueError("Require epochs > 0, batch_size > 0, patience >= 0")
         if not math.isfinite(entropy_weight) or entropy_weight < 0:
             raise ValueError("entropy_weight must be non-negative and finite")
+        if not math.isfinite(kl_weight) or kl_weight < 0:
+            raise ValueError("kl_weight must be non-negative and finite")
         if features["normal_val_count"] != 600:
             raise ValueError("Feature validation must begin with 600 normal samples")
         if not torch.all(features["tuning_labels"][:600] == 2):
@@ -234,6 +237,12 @@ class FeatureTrainer:
         self.device = torch.device(device)
         self.epochs, self.batch_size = epochs, batch_size
         self.entropy_weight, self.seed, self.patience = entropy_weight, seed, patience
+        self.kl_weight = kl_weight
+        self.is_vae = isinstance(model, FeatureVAE)
+        self.regularizer_name = "kl" if self.is_vae else "entropy"
+        checkpoint_model = "FeatureVAE" if self.is_vae else "MemAE"
+        self.best_checkpoint = f"best_{checkpoint_model}_weight.pth"
+        self.final_checkpoint = f"final_{checkpoint_model}_weight.pth"
         self.train_x = features["train_x"].to(self.device)
         self.tuning_x = features["tuning_x"].to(self.device)
         self.tuning_labels = features["tuning_labels"].cpu().numpy()
@@ -243,6 +252,14 @@ class FeatureTrainer:
         self.history = []
 
     def _loss_terms(self, batch):
+        if self.is_vae:
+            decoded, mu, logvar = self.model(batch, return_distribution=True)
+            reconstruction = (decoded - batch).square().mean()
+            # Sum over latent dimensions, then average over samples.
+            kl = -0.5 * (1 + logvar - mu.square() - logvar.exp()).sum(1).mean()
+            return torch.stack(
+                (reconstruction + self.kl_weight * kl, reconstruction, kl)
+            )
         decoded, attention = self.model(batch, return_attention=True)
 
         reconstruction = self.criterion(decoded)
@@ -340,7 +357,7 @@ class FeatureTrainer:
                     break
             if best_state is None:
                 raise RuntimeError("No feature checkpoint was selected")
-            torch.save(self.model.state_dict(), run / "final_MemAE_weight.pth")
+            torch.save(self.model.state_dict(), run / self.final_checkpoint)
             self.final_validation, _ = self.evaluate(self.tuning_x, self.tuning_labels)
             self.model.load_state_dict(best_state)
             self.selected_validation, self.tuning_scores = self.evaluate(

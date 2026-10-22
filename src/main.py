@@ -76,6 +76,12 @@ def get_args():
         help="Margin between the two nearest normalized memory vectors",
     )
     parser.add_argument("--entropy_weight", type=float, default=1.3e-6)
+    parser.add_argument(
+        "--kl_weight",
+        type=float,
+        default=1e-5,
+        help="FeatureVAE KL weight; KL sums latent dimensions and averages samples",
+    )
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--latent_dim", type=int, default=64)
     parser.add_argument("--hidden_dim", type=int, default=256)
@@ -90,7 +96,7 @@ def get_args():
         "--epochs",
         type=int,
         default=400,
-        help="Maximum epochs; FeatureMemAE selects the best validation AUROC",
+        help="Maximum epochs; feature models select the best validation AUROC",
     )
     parser.add_argument(
         "--augment",
@@ -115,7 +121,7 @@ def get_args():
         "--log_dir",
         type=str,
         default=str(Path(__file__).resolve().parents[1] / "logs"),
-        help="Root directory for logs; FeatureMemAE uses MemAE/run_n",
+        help="Root directory for logs; FeatureVAE uses DINOVAE/run_n, FeatureMemAE uses MemAE/run_n",
     )
     parser.add_argument(
         "--num_workers",
