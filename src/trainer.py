@@ -1,67 +1,25 @@
 import csv
 import math
 from pathlib import Path
-
 import numpy as np
 import torch
 from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
-from utils import Scorer
+from utils import *
 from models import MemAE
 from torch import nn, optim
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
+from torch.utils.checkpoint import checkpoint
 
 
-class SSIMLoss(nn.Module):
-    """Return 1 - mean SSIM for [0, 1] images using a 7x7 Gaussian window."""
-
-    def __init__(self):
+class CheckpointedModel(nn.Module):
+    def __init__(self, model: nn.Module):
         super().__init__()
-        coordinates = torch.arange(7, dtype=torch.float32) - 3
-        gaussian = torch.exp(-coordinates.square() / (2 * 1.5**2))
-        gaussian = gaussian / gaussian.sum()
-        self.register_buffer("window", torch.outer(gaussian, gaussian)[None, None])
+        self.model = model
 
-    def forward(self, decoded: torch.Tensor, target: torch.Tensor):
-        channels = decoded.size(1)
-        window = self.window.to(decoded).expand(channels, 1, -1, -1)
-        mean_decoded = F.conv2d(decoded, window, groups=channels)
-        mean_target = F.conv2d(target, window, groups=channels)
-        variance_decoded = (
-            F.conv2d(decoded.square(), window, groups=channels) - mean_decoded.square()
-        )
-        variance_target = (
-            F.conv2d(target.square(), window, groups=channels) - mean_target.square()
-        )
-        covariance = (
-            F.conv2d(decoded * target, window, groups=channels) - mean_decoded * mean_target
-        )
-
-        c1, c2 = 0.01**2, 0.03**2  # Input data range is 1.
-        numerator = (2 * mean_decoded * mean_target + c1) * (2 * covariance + c2)
-        denominator = (mean_decoded.square() + mean_target.square() + c1) * (
-            variance_decoded + variance_target + c2
-        )
-        return 1 - (numerator / denominator).mean()
-
-
-def memory_auxiliary_losses(encoded, memory_weight, margin=0.2):
-    """Pull normalized queries toward their nearest detached memory prototype."""
-    if memory_weight.size(0) < 2:
-        raise ValueError("Memory auxiliary losses require at least two memory vectors")
-    if not math.isfinite(margin) or margin <= 0:
-        raise ValueError("memory_margin must be positive and finite")
-
-    queries = F.normalize(encoded, dim=1)
-    prototypes = F.normalize(memory_weight.detach(), dim=1)
-    nearest = (queries @ prototypes.T).topk(2, dim=1).indices
-    positive, negative = prototypes[nearest[:, 0]], prototypes[nearest[:, 1]]
-    compactness = F.mse_loss(queries, positive)
-    separateness = F.triplet_margin_loss(
-        queries, positive, negative, margin=margin, p=2, eps=1e-6, reduction="mean"
-    )
-    return compactness, separateness
+    def forward(self, x):
+        return checkpoint(self.model, x, use_reentrant=False)
 
 
 class Trainer:
@@ -69,11 +27,12 @@ class Trainer:
         self,
         model: nn.Module,
         epochs: int,
+        threshold: float,
         train_loader: DataLoader,
         val_loader: DataLoader,
         criterion: nn.Module,
         optimizer: optim.Optimizer,
-        scorer: Scorer,
+        log_dir: str,
         device: torch.device,
         entropy_weight: float = 0.0001,
         compactness_weight: float = 0.0,
@@ -94,15 +53,27 @@ class Trainer:
             if not isinstance(model, MemAE):
                 raise ValueError("Memory auxiliary losses require a MemAE model")
             if model.memory.weight.size(0) < 2:
-                raise ValueError("Memory auxiliary losses require at least two memory vectors")
+                raise ValueError(
+                    "Memory auxiliary losses require at least two memory vectors"
+                )
 
         self.model = model
+        self.model = CheckpointedModel(model)
+        self.model.compile()
         self.epochs = epochs
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.criterion = criterion
         self.optimizer = optimizer
-        self.scorer = scorer
+
+        self.scorer = Scorer(
+            model=self.model,
+            loader=val_loader,
+            threshold=threshold,
+            criterion=criterion,
+            log_dir=log_dir,
+            device=device,
+        )
         self.device = device
         self.entropy_weight = entropy_weight
         self.compactness_weight = compactness_weight
@@ -118,15 +89,22 @@ class Trainer:
             )
             loss = self.criterion(decoded, x)
             if self.entropy_weight > 0:
-                entropy_loss = -(attention * attention.clamp_min(1e-12).log()).sum(dim=1).mean()
+                entropy_loss = (
+                    -(attention * attention.clamp_min(1e-12).log()).sum(dim=1).mean()
+                )
                 loss = loss + self.entropy_weight * entropy_loss
-            return (loss + self.compactness_weight * compactness
-                    + self.separateness_weight * separateness)
+            return (
+                loss
+                + self.compactness_weight * compactness
+                + self.separateness_weight * separateness
+            )
 
         if isinstance(self.model, MemAE) and self.entropy_weight > 0:
             decoded, attention = self.model(x, return_attention=True)
             # Sum over memory slots, then average over the batch; avoid log(0).
-            entropy_loss = -(attention * attention.clamp_min(1e-12).log()).sum(dim=1).mean()
+            entropy_loss = (
+                -(attention * attention.clamp_min(1e-12).log()).sum(dim=1).mean()
+            )
             return self.criterion(decoded, x) + self.entropy_weight * entropy_loss
 
         return self.criterion(self.model(x), x)
@@ -140,7 +118,7 @@ class Trainer:
         total_samples = 0
         pbar = tqdm(
             self.train_loader,
-            desc=f"{epoch} Epoch training:",
+            desc=f"{epoch} Epoch training",
             postfix={"Loss": loss.item()},
             leave=False,
         )
@@ -160,6 +138,8 @@ class Trainer:
             self.scorer.visualize_IO(epoch, x)
 
         return total_loss / total_samples
+
+        self.scorer.visualize_IO(epoch=epoch, samples=x, num_samples=4)
 
     @torch.inference_mode()
     def validate(self, epoch: int):
@@ -184,6 +164,12 @@ class Trainer:
             total_loss += batch_loss * x.size(0)
             total_samples += x.size(0)
             pbar.set_postfix({"Loss": batch_loss})
+
+        self.scorer.collect_record(epoch)
+        self.scorer.plot_auc(epoch)
+        self.scorer.plot_score(epoch)
+        self.scorer.plot_metrics(epoch)
+        self.scorer.save_record(epoch)
 
         return total_loss / total_samples
 
@@ -222,8 +208,18 @@ class FeatureTrainer:
     """Train cached feature reconstruction with run126's validation selection."""
 
     def __init__(
-        self, model, epochs, features, optimizer, scorer, device,
-        batch_size=64, entropy_weight=1.3e-6, seed=42, patience=80,
+        self,
+        model: nn.Module,
+        epochs: int,
+        features: dict,
+        criterion: nn.Module,
+        optimizer: optim.Optimizer,
+        scorer: Scorer,
+        device: torch.device | str,
+        batch_size: int = 64,
+        entropy_weight: float = 1.3e-6,
+        seed: int = 42,
+        patience: int = 80,
     ):
         if epochs < 1 or batch_size < 1 or patience < 0:
             raise ValueError("Require epochs > 0, batch_size > 0, patience >= 0")
@@ -241,25 +237,38 @@ class FeatureTrainer:
         self.train_x = features["train_x"].to(self.device)
         self.tuning_x = features["tuning_x"].to(self.device)
         self.tuning_labels = features["tuning_labels"].cpu().numpy()
+        self.criterion = criterion
         self.best_epoch = self.completed_epochs = 0
         self.selected_validation = self.tuning_scores = self.final_validation = None
         self.history = []
 
     def _loss_terms(self, batch):
         decoded, attention = self.model(batch, return_attention=True)
-        reconstruction = (decoded - batch).square().mean()
+
+        reconstruction = self.criterion(decoded)
         entropy = -(attention * attention.clamp_min(1e-12).log()).sum(1).mean()
-        return torch.stack((
-            reconstruction + self.entropy_weight * entropy, reconstruction, entropy,
-        ))
+
+        return torch.stack(
+            (
+                reconstruction + self.entropy_weight * entropy,
+                reconstruction,
+                entropy,
+            )
+        )
 
     @torch.inference_mode()
     def evaluate(self, features, labels, batch_size=256):
         self.model.eval()
         features = features.to(self.device)
-        labels = labels.cpu().numpy() if isinstance(labels, torch.Tensor) else np.asarray(labels)
-        values = [(self.model(batch) - batch).square().mean(1)
-                  for batch in features.split(batch_size)]
+        labels = (
+            labels.cpu().numpy()
+            if isinstance(labels, torch.Tensor)
+            else np.asarray(labels)
+        )
+        values = [
+            (self.model(batch) - batch).square().mean(1)
+            for batch in features.split(batch_size)
+        ]
         scores = torch.cat(values).cpu().numpy()
         if not np.isfinite(scores).all():
             raise ValueError("Non-finite feature reconstruction scores")
@@ -288,7 +297,9 @@ class FeatureTrainer:
             for epoch in range(1, self.epochs + 1):
                 self.model.train()
                 total = torch.zeros(3, device=self.device)
-                permutation = torch.randperm(len(self.train_x), generator=generator).to(self.device)
+                permutation = torch.randperm(len(self.train_x), generator=generator).to(
+                    self.device
+                )
                 for indices in permutation.split(self.batch_size):
                     batch = self.train_x[indices]
                     self.optimizer.zero_grad(set_to_none=True)
@@ -304,17 +315,27 @@ class FeatureTrainer:
                 validation, _ = self.evaluate(self.tuning_x, self.tuning_labels)
                 if validation["auroc"] > best_auc:
                     best_auc, self.best_epoch = validation["auroc"], epoch
-                    best_state = {key: value.detach().cpu().clone()
-                                  for key, value in self.model.state_dict().items()}
+                    best_state = {
+                        key: value.detach().cpu().clone()
+                        for key, value in self.model.state_dict().items()
+                    }
                     torch.save(best_state, run / "best_MemAE_weight.pth")
-                self.history.append({
-                    "epoch": epoch, "train_loss": training[0], "val_loss": validation_loss[0],
-                    "tuning_auroc": validation["auroc"],
-                    "train_reconstruction": training[1], "val_reconstruction": validation_loss[1],
-                    "train_entropy": training[2], "val_entropy": validation_loss[2],
-                })
-                tqdm.write(f"Epoch {epoch}/{self.epochs} - train_loss: {training[0]:.8f}, "
-                           f"val_loss: {validation_loss[0]:.8f}, tuning_auroc: {validation['auroc']:.6f}")
+                self.history.append(
+                    {
+                        "epoch": epoch,
+                        "train_loss": training[0],
+                        "val_loss": validation_loss[0],
+                        "tuning_auroc": validation["auroc"],
+                        "train_reconstruction": training[1],
+                        "val_reconstruction": validation_loss[1],
+                        "train_entropy": training[2],
+                        "val_entropy": validation_loss[2],
+                    }
+                )
+                tqdm.write(
+                    f"Epoch {epoch}/{self.epochs} - train_loss: {training[0]:.8f}, "
+                    f"val_loss: {validation_loss[0]:.8f}, tuning_auroc: {validation['auroc']:.6f}"
+                )
                 if epoch >= 100 and epoch - self.best_epoch >= self.patience:
                     break
             if best_state is None:
@@ -322,13 +343,26 @@ class FeatureTrainer:
             torch.save(self.model.state_dict(), run / "final_MemAE_weight.pth")
             self.final_validation, _ = self.evaluate(self.tuning_x, self.tuning_labels)
             self.model.load_state_dict(best_state)
-            self.selected_validation, self.tuning_scores = self.evaluate(self.tuning_x, self.tuning_labels)
+            self.selected_validation, self.tuning_scores = self.evaluate(
+                self.tuning_x, self.tuning_labels
+            )
         finally:
-            with (run / "loss_history.csv").open("w", newline="", encoding="utf-8") as handle:
-                writer = csv.DictWriter(handle, fieldnames=[
-                    "epoch", "train_loss", "val_loss", "tuning_auroc",
-                    "train_reconstruction", "val_reconstruction", "train_entropy", "val_entropy",
-                ])
+            with (run / "loss_history.csv").open(
+                "w", newline="", encoding="utf-8"
+            ) as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=[
+                        "epoch",
+                        "train_loss",
+                        "val_loss",
+                        "tuning_auroc",
+                        "train_reconstruction",
+                        "val_reconstruction",
+                        "train_entropy",
+                        "val_entropy",
+                    ],
+                )
                 writer.writeheader()
                 writer.writerows(self.history)
         return self.model

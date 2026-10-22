@@ -3,20 +3,26 @@ import csv
 import json
 import random
 from pathlib import Path
+import matplotlib
+
+matplotlib.use("Agg")  # Save plots without requiring a desktop GUI backend.
 
 import numpy as np
 
 print("Running main.py in", os.getcwd())
 
 from argparse import ArgumentParser, Namespace
-from data import load_dataset, get_loaders
-from torchvision import transforms
-from trainer import FeatureTrainer, SSIMLoss, Trainer
-from utils import Scorer
+from torchvision.transforms import v2
 from torch import nn, optim
+from trainer import *
+from models import *
+from utils import *
+from data import *
 import models
+import utils
 import torch
 import data
+
 
 def get_args():
     parser = ArgumentParser()
@@ -51,12 +57,24 @@ def get_args():
         default="AdamW",
         help="Optimizer to Update parameters",
     )
-    parser.add_argument("--compactness_weight", type=float, default=0.0,
-                        help="Weight of the MemAE feature compactness loss")
-    parser.add_argument("--separateness_weight", type=float, default=0.0,
-                        help="Weight of the MemAE feature separateness loss")
-    parser.add_argument("--memory_margin", type=float, default=0.2,
-                        help="Margin between the two nearest normalized memory vectors")
+    parser.add_argument(
+        "--compactness_weight",
+        type=float,
+        default=0.0,
+        help="Weight of the MemAE feature compactness loss",
+    )
+    parser.add_argument(
+        "--separateness_weight",
+        type=float,
+        default=0.0,
+        help="Weight of the MemAE feature separateness loss",
+    )
+    parser.add_argument(
+        "--memory_margin",
+        type=float,
+        default=0.2,
+        help="Margin between the two nearest normalized memory vectors",
+    )
     parser.add_argument("--entropy_weight", type=float, default=1.3e-6)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--latent_dim", type=int, default=64)
@@ -64,7 +82,6 @@ def get_args():
     parser.add_argument("--memory_size", type=int, default=100)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--shrink_threshold", type=float, default=0.01)
-    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--patience", type=int, default=80)
     parser.add_argument(
         "--lr", type=float, default=0.001, help="Learning rate to pass optimizer"
@@ -77,9 +94,9 @@ def get_args():
     )
     parser.add_argument(
         "--augment",
-        type=list,
-        default=None,
-        help="A list of torchvision data augmentations to apply.",
+        nargs="+",
+        default=["none"],
+        help="A list of torchvision data augmentations to apply. Default is 'none'",
     )
     parser.add_argument(
         "--batch_size",
@@ -106,163 +123,49 @@ def get_args():
         default=0,
         help="num_workers param in PyTorch DataLoader",
     )
+    parser.add_argument(
+        "--seed", type=int, default=42, help="PyTorch random seed for reproducibility"
+    )
 
     args = parser.parse_args()
     return args
 
 
-def train_feature_model(args: Namespace):
-    """Run the frozen DINOv2 + FeatureMemAE configuration selected in run_126."""
-    import matplotlib
+def run_fmemae(args: Namespace):
 
-    matplotlib.use("Agg")  # Save plots without requiring a desktop GUI backend.
-    if args.train_criterion != "MSELoss" or args.score_criterion != "MSELoss":
-        raise ValueError("The DINOv2 configuration uses feature MSE for training and scoring")
-    if args.compactness_weight or args.separateness_weight or args.augment is not None:
-        raise ValueError("The DINOv2 configuration uses no auxiliary losses or augmentation")
-    if min(args.epochs, args.batch_size) <= 0 or args.patience < 0:
-        raise ValueError("epochs and batch_size must be positive; patience must be non-negative")
-
-    device = torch.device(args.device)
-    torch.set_num_threads(2)
-    features = data.load_dinov2_features(root=args.data_root, device=device)
-    # Reset after backbone initialization/extraction so the trainable head matches run_126.
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    if device.type == "cuda":
-        torch.cuda.manual_seed_all(args.seed)
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.allow_tf32 = True
-    torch.backends.cuda.matmul.allow_tf32 = False
-    model = models.FeatureMemAE(
-        input_dim=384, hidden_dim=args.hidden_dim, latent_dim=args.latent_dim,
-        memory_size=args.memory_size, shrink_threshold=args.shrink_threshold,
-        temperature=args.temperature,
-    ).to(device)
-    optimizer = getattr(optim, args.optimizer)(
-        model.parameters(), lr=args.lr, weight_decay=args.weight_decay,
-    )
-
-    base = Path(args.log_dir) / "MemAE"
-    base.mkdir(parents=True, exist_ok=True)
-    number = max((int(p.name[4:]) for p in base.glob("run_*")
-                  if p.is_dir() and p.name[4:].isdigit()), default=0) + 1
-    while True:
-        run = base / f"run_{number:02d}"
-        try:
-            run.mkdir()
-            break
-        except FileExistsError:
-            number += 1
-    print(f"Frozen DINOv2 + FeatureMemAE: {run}", flush=True)
-    config = vars(args) | {
-        "run": run.name, "model": "FeatureMemAE_DINOv2", "input_dim": 384,
-        "feature_dim": 384, "hidden": args.hidden_dim, "latent": args.latent_dim,
-        "memory": args.memory_size, "batch": args.batch_size, "entropy": args.entropy_weight,
-        "feature_backbone": features["metadata"], "data_split_seed": 42,
-        "tuning_anomaly_seed": 1337, "eval_every": 1, "early_stopping_min_epoch": 100,
-        "checkpoint_selection": "maximum AUROC on fixed labeled tuning validation",
-        "checkpoint_note": "Trainable FeatureMemAE only; DINOv2 weights remain frozen",
-        "cudnn_deterministic": True, "cudnn_allow_tf32": True, "matmul_allow_tf32": False,
-        "torch_version": str(torch.__version__),
-    }
-    (run / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
-    (run / "optimizer_defaults.json").write_text(
-        json.dumps(optimizer.defaults, indent=2), encoding="utf-8")
-    (run / "split_indices.json").write_text(json.dumps({
-        "train_normal_indices": features["train_ids"].tolist(),
-        "normal_validation_indices": features["tuning_ids"][:600].tolist(),
-        "tuning_validation_train_indices": features["tuning_ids"].tolist(),
-        "test_indices": features["test_ids"].tolist(),
-    }, indent=2), encoding="utf-8")
-    scorer = Scorer(model, [], args.threshold, nn.MSELoss(), str(run), device)
-    trainer = FeatureTrainer(
-        model, args.epochs, features, optimizer, scorer, device,
-        batch_size=args.batch_size, entropy_weight=args.entropy_weight,
-        seed=args.seed, patience=args.patience,
-    )
-    trainer.fit()
-    test_metrics, test_scores = trainer.evaluate(
-        features["test_x"], features["test_labels"], batch_size=1,
-    )
-    threshold = float(np.quantile(trainer.tuning_scores[features["tuning_labels"].numpy() == 2], 0.95))
-    scorer.THRESHOLDVAL = threshold
-    scorer.record = {
-        "id": list(range(len(test_scores))),
-        "label": (features["test_labels"].numpy() != 2).astype(int).tolist(),
-        "score": test_scores.tolist(), "normal": (test_scores <= threshold).astype(int).tolist(),
-    }
-    scorer.plot_auc(trainer.best_epoch)
-    scorer.plot_score(trainer.best_epoch)
-    scorer.save_record(trainer.best_epoch)
-    for name, scores in (("tuning", trainer.tuning_scores), ("test", test_scores)):
-        with (run / f"{name}_scores.csv").open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(["id", "dataset_index", "class", "anomaly", "score"])
-            writer.writerows((i, int(idx), int(label), int(label != 2), float(score))
-                             for i, (idx, label, score) in enumerate(zip(
-                                 features[name + "_ids"], features[name + "_labels"], scores)))
-    config.update(decision_threshold=threshold,
-                  threshold_rule="95th percentile of normal validation feature MSE; not used for AUROC")
-    (run / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
-    metrics = {
-        "status": "complete", "selected_epoch": trainer.best_epoch,
-        "completed_epochs": trainer.completed_epochs,
-        "early_stopped": trainer.completed_epochs < args.epochs,
-        "selected_validation": trainer.selected_validation, "selected_test": test_metrics,
-        "final_validation": trainer.final_validation, "test_evaluated": True,
-        "selected_checkpoint": "best_MemAE_weight.pth", "final_checkpoint": "final_MemAE_weight.pth",
-    }
-    (run / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-    print(json.dumps({"run": run.name, **metrics}, indent=2), flush=True)
-    return model
-
-
-def main(args: Namespace):
-    if "FeatureMemAE" in args.models:
-        if args.models != ["FeatureMemAE"]:
-            raise ValueError("Run FeatureMemAE separately from the image reconstruction models")
-        return train_feature_model(args)
-    if args.augment == None:
-        augmentations = transforms.ToTensor()
+    if args.augment == ["none"]:
+        augmentations = v2.ToDtype(torch.float32)
     elif isinstance(args.augment, list):
         temp = []
         try:
             for aug in args.augment:
-                temp.append(getattr(transforms, aug))
-                augmentations = transforms.Compose(temp)
+                temp.append(getattr(v2, aug))
+                augmentations = v2.Compose(temp)
         except AttributeError as e:
             print(e)
             print(f"Please check {args.augment} contains torchvision.transforms")
 
     try:
-        model_list = []
-        for m in args.models:
-            model_list.append(getattr(models, m))
+        train_criterion_class = getattr(nn, args.train_criterion)
     except AttributeError as e:
         print(e)
-        print(f"Please check {args.models} exist at models.py script.")
+        print(f"Please check {args.train_criterion} exist at `torch.nn`.")
+        try:
+            train_criterion_class = getattr(utils, args.train_criterion)
+        except AttributeError as e:
+            print(e)
+            print(f"Please check {args.train_criterion} exist at `utils.py` script.")
 
     try:
-        train_criterion_class = (
-            SSIMLoss
-            if args.train_criterion == "SSIMLoss"
-            else getattr(nn, args.train_criterion)
-        )
-        score_criterion_class = (
-            SSIMLoss
-            if args.score_criterion == "SSIMLoss"
-            else getattr(nn, args.score_criterion)
-        )
+        score_criterion_class = getattr(nn, args.score_criterion)
     except AttributeError as e:
         print(e)
-        print(
-            f"Please check {args.train_criterion} and {args.score_criterion} "
-            "are PyTorch loss functions or SSIMLoss"
-        )
-        raise
+        print(f"Please check {args.score_criterion} exist at `torch.nn`.")
+        try:
+            score_criterion_class = getattr(utils, args.score_criterion)
+        except AttributeError as e:
+            print(e)
+            print(f"Please check {args.score_criterion} exist at `utils.py` script.")
 
     try:
         optimizer_class = getattr(optim, args.optimizer)
@@ -271,13 +174,237 @@ def main(args: Namespace):
         print(f"Please check {args.optimizer} at PyTorch optimizers")
 
     device = torch.device(args.device)
+    torch.set_num_threads(2)
+    features = data.load_dinov2_features(
+        root=args.data_root, transforms=augmentations, device=device
+    )
+    # Reset after backbone initialization/extraction so the trainable head matches run_126.
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+
+    if device.type == "cuda":
+        torch.cuda.manual_seed_all(args.seed)
+
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cuda.matmul.allow_tf32 = False
+
+    model = models.FeatureMemAE(
+        input_dim=384,
+        hidden_dim=args.hidden_dim,
+        latent_dim=args.latent_dim,
+        memory_size=args.memory_size,
+        shrink_threshold=args.shrink_threshold,
+        temperature=args.temperature,
+    ).to(device)
+
+    optimizer = optimizer_class(
+        model.parameters(),
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+    )
+    train_criterion = train_criterion_class()
+
+    base = Path(args.log_dir) / "MemAE"
+    base.mkdir(parents=True, exist_ok=True)
+    number = (
+        max(
+            (
+                int(p.name[4:])
+                for p in base.glob("run_*")
+                if p.is_dir() and p.name[4:].isdigit()
+            ),
+            default=0,
+        )
+        + 1
+    )
+    while True:
+        run = base / f"run_{number:02d}"
+        try:
+            run.mkdir()
+            break
+        except FileExistsError:
+            number += 1
+
+    print(f"Frozen DINOv2 + FeatureMemAE: {run}", flush=True)
+
+    config = vars(args) | {
+        "run": run.name,
+        "model": "FeatureMemAE_DINOv2",
+        "input_dim": 384,
+        "feature_dim": 384,
+        "hidden": args.hidden_dim,
+        "latent": args.latent_dim,
+        "memory": args.memory_size,
+        "batch": args.batch_size,
+        "entropy": args.entropy_weight,
+        "feature_backbone": features["metadata"],
+        "data_split_seed": 42,
+        "tuning_anomaly_seed": 1337,
+        "eval_every": 1,
+        "early_stopping_min_epoch": 100,
+        "checkpoint_selection": "maximum AUROC on fixed labeled tuning validation",
+        "checkpoint_note": "Trainable FeatureMemAE only; DINOv2 weights remain frozen",
+        "cudnn_deterministic": True,
+        "cudnn_allow_tf32": True,
+        "matmul_allow_tf32": False,
+        "torch_version": str(torch.__version__),
+    }
+    (run / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+    (run / "optimizer_defaults.json").write_text(
+        json.dumps(optimizer.defaults, indent=2), encoding="utf-8"
+    )
+    (run / "split_indices.json").write_text(
+        json.dumps(
+            {
+                "train_normal_indices": features["train_ids"].tolist(),
+                "normal_validation_indices": features["tuning_ids"][:600].tolist(),
+                "tuning_validation_train_indices": features["tuning_ids"].tolist(),
+                "test_indices": features["test_ids"].tolist(),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    score_criterion = score_criterion_class()
+    scorer = Scorer(model, [], args.threshold, score_criterion, str(run), device)
+    trainer = FeatureTrainer(
+        model,
+        args.epochs,
+        features,
+        train_criterion,
+        optimizer,
+        scorer,
+        device,
+        batch_size=args.batch_size,
+        entropy_weight=args.entropy_weight,
+        seed=args.seed,
+        patience=args.patience,
+    )
+    trainer.fit()
+    test_metrics, test_scores = trainer.evaluate(
+        features["test_x"],
+        features["test_labels"],
+        batch_size=1,
+    )
+    threshold = float(
+        np.quantile(trainer.tuning_scores[features["tuning_labels"].numpy() == 2], 0.95)
+    )
+    scorer.THRESHOLDVAL = threshold
+    scorer.record = {
+        "id": list(range(len(test_scores))),
+        "label": (features["test_labels"].numpy() != 2).astype(int).tolist(),
+        "score": test_scores.tolist(),
+        "normal": (test_scores <= threshold).astype(int).tolist(),
+    }
+    scorer.plot_auc(trainer.best_epoch)
+    scorer.plot_score(trainer.best_epoch)
+    scorer.save_record(trainer.best_epoch)
+    for name, scores in (("tuning", trainer.tuning_scores), ("test", test_scores)):
+        with (run / f"{name}_scores.csv").open(
+            "w", newline="", encoding="utf-8"
+        ) as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["id", "dataset_index", "class", "anomaly", "score"])
+            writer.writerows(
+                (i, int(idx), int(label), int(label != 2), float(score))
+                for i, (idx, label, score) in enumerate(
+                    zip(features[name + "_ids"], features[name + "_labels"], scores)
+                )
+            )
+    config.update(
+        decision_threshold=threshold,
+        threshold_rule="95th percentile of normal validation feature MSE; not used for AUROC",
+    )
+    (run / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+    metrics = {
+        "status": "complete",
+        "selected_epoch": trainer.best_epoch,
+        "completed_epochs": trainer.completed_epochs,
+        "early_stopped": trainer.completed_epochs < args.epochs,
+        "selected_validation": trainer.selected_validation,
+        "selected_test": test_metrics,
+        "final_validation": trainer.final_validation,
+        "test_evaluated": True,
+        "selected_checkpoint": "best_MemAE_weight.pth",
+        "final_checkpoint": "final_MemAE_weight.pth",
+    }
+    (run / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    print(json.dumps({"run": run.name, **metrics}, indent=2), flush=True)
+    return model
+
+
+def main(args: Namespace):
+    if min(args.epochs, args.batch_size) <= 0 or args.patience < 0:
+        raise ValueError(
+            "epochs and batch_size must be positive; patience must be non-negative"
+        )
+
+    if args.augment == ["none"]:
+        augmentations = v2.ToDtype(torch.float32)
+    elif isinstance(args.augment, list):
+        temp = []
+        try:
+            for aug in args.augment:
+                temp.append(getattr(v2, aug))
+                augmentations = v2.Compose(temp)
+        except AttributeError as e:
+            print(e)
+            print(f"Please check {args.augment} contains torchvision.transforms")
+
+    try:
+        train_criterion_class = getattr(nn, args.train_criterion)
+    except AttributeError as e:
+        print(e)
+        print(f"Please check {args.train_criterion} exist at `torch.nn`.")
+        try:
+            train_criterion_class = getattr(utils, args.train_criterion)
+        except AttributeError as e:
+            print(e)
+            print(f"Please check {args.train_criterion} exist at `utils.py` script.")
+
+    try:
+        score_criterion_class = getattr(nn, args.score_criterion)
+    except AttributeError as e:
+        print(e)
+        print(f"Please check {args.score_criterion} exist at `torch.nn`.")
+        try:
+            score_criterion_class = getattr(utils, args.score_criterion)
+        except AttributeError as e:
+            print(e)
+            print(f"Please check {args.score_criterion} exist at `utils.py` script.")
+
+    try:
+        optimizer_class = getattr(optim, args.optimizer)
+    except AttributeError as e:
+        print(e)
+        print(f"Please check {args.optimizer} at PyTorch optimizers")
+
+    try:
+        model_list = []
+        for m in args.models:
+            if "FeatureMemAE" == m:
+                run_fmemae(args)
+                continue
+            model_list.append(getattr(models, m))
+    except AttributeError as e:
+        print(e)
+        print(f"Please check {args.models} exist at `models` dir")
+
+    device = torch.device(args.device)
     print(f"Running on {args.device}")
 
     print("Setting directories")
-    os.makedirs(args.log_dir, mode=751, exist_ok=True)
+    os.makedirs(args.data_root, mode=755, exist_ok=True)
+    os.makedirs(args.log_dir, mode=755, exist_ok=True)
 
     print("Get data loaders")
-    train_set, val_set, test_set = load_dataset(root=args.data_root, transform=augmentations)
+    train_set, val_set, test_set = load_dataset(
+        root=args.data_root, transform=augmentations, seed=args.seed
+    )
     train_loader, val_loader, test_loader = get_loaders(
         train_set, val_set, test_set, args.batch_size, args.num_workers
     )
@@ -304,11 +431,12 @@ def main(args: Namespace):
         trainer = Trainer(
             model=model,
             epochs=args.epochs,
+            threshold=args.threshold,
             train_loader=train_loader,
             val_loader=val_loader,
             criterion=train_criterion,
             optimizer=optimizer,
-            scorer=scorer,
+            log_dir=log_path,
             device=device,
             compactness_weight=args.compactness_weight,
             separateness_weight=args.separateness_weight,

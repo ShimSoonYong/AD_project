@@ -1,13 +1,16 @@
 #!/bin/bash
 
 docker run \
-  --name ad_proj \
+  --name pccae \
   --rm \
   --detach \
   --gpus all \
   --ipc host \
+  --ulimit memlock=-1 \
+  --shm-size 32gb \
   --volume $(pwd):/workspace \
   ad_project \
   python src/main.py \
-  --models Autoencoder CNN \
-  --epochs 20
+  --models PCCAE \
+  --threshold 0.03 \
+  --lr 2e-4
