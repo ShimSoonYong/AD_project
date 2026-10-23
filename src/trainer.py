@@ -58,7 +58,6 @@ class Trainer:
                 )
 
         self.model = model
-        self.model = CheckpointedModel(model)
         self.model.compile()
         self.epochs = epochs
         self.train_loader = train_loader

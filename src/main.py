@@ -404,6 +404,7 @@ def main(args: Namespace):
                 continue
             elif "FeatureVAE" == m:
                 run_fae(args, m)
+                continue
 
             model_list.append(getattr(models, m))
     except AttributeError as e:
