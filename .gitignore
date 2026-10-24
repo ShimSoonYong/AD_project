@@ -2,3 +2,8 @@ dataset/FashionMNIST/*
 git_token.txt
 */__pycache__/*
 logs/*
+.venv/
+submission*/
+AD_project_sample/
+docs/experiments.md
+docs/loss_function.md

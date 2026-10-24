@@ -3,7 +3,7 @@ from torchvision import transforms
 from torchvision.datasets import FashionMNIST
 from torch.utils.data import Dataset, DataLoader
 
-ROOT_DIR = "/workspace/dataset/"
+ROOT_DIR = "dataset/"
 SELECT_NORMAL = 2 # Set 2 class as normal samples. 
 
 def load_dataset(root=ROOT_DIR, transform=transforms.ToTensor()):
@@ -23,8 +23,8 @@ def load_dataset(root=ROOT_DIR, transform=transforms.ToTensor()):
 
 def get_loaders(train_set, test_set, batch_size, num_workers):
 
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
-    test_loader = DataLoader(test_set, batch_size=1, shuffle=False, num_workers=num_workers, pin_memory=True)
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=torch.cuda.is_available())
+    test_loader = DataLoader(test_set, batch_size=1, shuffle=False, num_workers=num_workers, pin_memory=torch.cuda.is_available())
 
     return train_loader, test_loader
 

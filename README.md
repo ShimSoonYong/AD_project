@@ -44,15 +44,20 @@
 ├── notebooks/            # 실험 및 데이터 분석용 Jupyter Notebooks
 │   ├── EDA.ipynb         # 데이터 탐색 및 시각화
 │   └── demo.ipynb        # 모델 추론 테스트
+├── docs/
+│   └── center_loss.md    # 중심 규제 loss(recon + λ||z−c||²) 실험 설명과 결과
 ├── scripts/              # 실행 자동화 쉘 스크립트
-│   └── baseline.sh       # 베이스라인 모델 학습/평가 스크립트
+│   ├── baseline.sh       # 베이스라인 모델 학습/평가 스크립트
+│   ├── center_loss_experiment.py # 중심 규제 loss 실험 (docs/center_loss.md 결과)
+│   └── make_submission.py # i-campus 제출 노트북 생성 및 검증
 ├── src/                  # 재사용 가능한 핵심 모듈 (여기에 코드 작성)
 │   ├── __init__.py
 │   ├── data.py           # Dataset, DataLoader 및 전처리 로직
 │   ├── main.py           # Argument 기반의 통합 실행 파이프라인
 │   ├── models.py         # Autoencoder 등 네트워크 아키텍처 정의
+│   ├── scoring.py        # SSIM / perceptual loss와 이상 점수 함수
 │   ├── trainer.py        # 훈련(Train) 및 검증(Val) 루프 로직
-│   └── utils.py          # AUROC 계산, Loss 함수 등 유틸리티
+│   └── utils.py          # AUROC 계산, 그래프, 결과 CSV 저장 (Scorer)
 ├── tests/                # src/ 내부 모듈에 대한 Unit Test
 ├── Dockerfile            # PyTorch 기반 프로젝트 환경 설정 파일
 ├── .dockerignore
@@ -85,7 +90,21 @@ docker run --gpus all -it -p 8888:8888 -v $(pwd):/workspace cv-anomaly-detection
 
 ```
 
----
+**방법 3: 로컬 venv (Windows/Linux, Python 3.12)**
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate / Linux: source .venv/bin/activate
+
+# GPU 없음
+pip install -r cpu_requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+# NVIDIA GPU (CUDA 12.6+). 설치 후 torch.cuda.is_available()가 True인지 확인
+pip install -r gpu_requirements.txt --extra-index-url https://download.pytorch.org/whl/cu126
+
+# 학습 (device는 cuda가 있으면 cuda, 없으면 cpu로 자동 선택)
+python src/main.py --models Autoencoder CNN --epochs 20
+```
+
 
 ## 5. Deliverables & Deadlines
 
@@ -106,6 +125,21 @@ docker run --gpus all -it -p 8888:8888 -v $(pwd):/workspace cv-anomaly-detection
 
 
 * 훈련된 가중치 파일 (`.pt` 또는 `.pth`). 학습 없이 즉시 inference가 가능해야 함.
+
+
+* 제출 노트북 생성: 아래 명령은 `AD_project_sample/code submission form.ipynb` 양식의 빈칸을 채운 노트북(모델 코드는 `src/models.py`에서 복사)과 weight를 `submission/`에 만들고, 노트북을 실행해 Kaggle에 낸 CSV와 결과가 같은지 검사합니다. Linux에서 학습했다면 `--train_os Linux`를 붙입니다(FAQ: Linux 사용 시 주석 표기).
+
+```bash
+python scripts/make_submission.py --model Autoencoder --latent_dim 4 --hidden_dim 128 \
+    --score perceptual --threshold 0 \
+    --weight logs/final_C/Autoencoder/checkpoint/epoch15_weight.pth \
+    --check_csv logs/final_C/Autoencoder/record/epoch15_result_team_2.csv \
+    --members "이름 (학번)" "이름 (학번)" "이름 (학번)" "이름 (학번)"
+```
+
+모델 구조 옵션(`--latent_dim`, `--hidden_dim`)과 `--score`는 학습 때와 같은 값을 넣어야 합니다. `--train_note "..."`를 붙이면 어떤 loss로 학습했는지가 노트북 첫 셀 주석에 들어갑니다(학습 코드는 제출 대상이 아니므로 설명용).
+
+* i-campus에는 `submission/code_submission_team2.ipynb`와 `submission/model_team2.pth` 두 파일만 올립니다(`.data/`, 이미지, CSV 제외).
 
 
 

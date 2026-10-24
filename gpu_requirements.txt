@@ -1,0 +1,26 @@
+# Python 3.12.3
+
+# Check your maximum CUDA support with `nvidia-smi` (needs CUDA 12.6+)
+# Install command:
+# pip install -r gpu_requirements.txt --extra-index-url https://download.pytorch.org/whl/cu126
+# Change /cu126 to /cu130 if your CUDA version is 13.0+
+# torch 2.14.1 has no cu124/cu118 build. Without the CUDA index, pip installs the
+# CPU-only torch from PyPI on Windows, so check torch.cuda.is_available() after install.
+
+torch==2.14.1
+torchvision==0.29.1
+einops==0.8.2
+opencv-python==4.11.0.86
+pillow==12.3.0
+pycocotools>=2.0.11
+safetensors==0.8.0
+timm==1.0.15
+
+# Used by src/ and the submission notebook (same as Dockerfile)
+numpy==2.5.4
+pandas==3.0.6
+matplotlib==3.11.2
+scikit-learn==1.9.1
+tqdm==4.70.1
+jupyterlab==4.6.4
+ipykernel==7.4.0

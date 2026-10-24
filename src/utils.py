@@ -3,10 +3,16 @@ import torch
 from torch import nn
 import numpy as np
 import pandas as pd
+import matplotlib
+
+# Figures are only saved to files; the default Tk backend crashes on Windows when figures
+# get garbage-collected from another thread (Tcl_AsyncDelete)
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from sklearn.metrics import auc, roc_curve
 from data import SELECT_NORMAL
+from scoring import anomaly_score, train_statistics
 
 
 class Scorer:
@@ -15,15 +21,17 @@ class Scorer:
         model: nn.Module,
         loader: DataLoader,
         threshold: float,
-        criterion: nn.Module,
         log_dir: str,
         device: torch.device,
+        score: str = "mse",
+        stats_loader: DataLoader = None,
     ):
 
         self.model = model
         self.loader = loader
         self.THRESHOLDVAL = threshold  # threshold val
-        self.criterion = criterion
+        self.score = score  # anomaly score type, see scoring.SCORES
+        self.stats_loader = stats_loader  # normal train data, needed for "mse+ssim"
         self.LOG_DIR = log_dir
         self.DEVICE = device
         os.makedirs(f"{self.LOG_DIR}/compare_io", mode=751, exist_ok=True)
@@ -34,7 +42,9 @@ class Scorer:
     @torch.inference_mode()
     def visualize_IO(self, epoch: int, samples: torch.Tensor, num_samples: int = 4):
 
-        _, ax = plt.subplots(2, num_samples, figsize=(num_samples, 2))
+        # The last batch (or batch_size < num_samples) can have fewer samples
+        num_samples = min(num_samples, len(samples))
+        _, ax = plt.subplots(2, num_samples, figsize=(num_samples, 2), squeeze=False)
 
         for i in range(num_samples):
             img = samples.cpu().data.numpy()[i].reshape(28, 28, -1)
@@ -62,10 +72,14 @@ class Scorer:
     def collect_record(self, epoch: int):
         record = {"id": [], "label": [], "score": [], "normal": []}
 
+        stats = None
+        if self.score == "mse+ssim":
+            stats = train_statistics(self.model, self.stats_loader, self.DEVICE)
+
         for step, (x, label) in enumerate(self.loader):
             x = x.to(self.DEVICE)
             decoded = self.model(x)
-            loss = float(self.criterion(decoded, x).cpu().numpy())
+            loss = float(anomaly_score(x, decoded, self.score, stats).cpu().numpy()[0])
 
             record["id"].append(step)
             record["label"].append(int(label != SELECT_NORMAL))

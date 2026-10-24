@@ -5,29 +5,43 @@ import torch.nn.functional as F
 
 # basic autoencoder
 class Autoencoder(nn.Module):
-    def __init__(self):
+    def __init__(
+        self,
+        latent_dim: int = 2,
+        hidden_dim: int = 128,
+        activation: str = "relu",
+        norm: str = "none",
+    ):
         super().__init__()
 
+        def hidden_block(in_dim):
+            # Linear -> (LayerNorm) -> activation; defaults keep the original layer layout
+            layers = [nn.Linear(in_dim, hidden_dim)]
+            if norm == "layer":
+                layers.append(nn.LayerNorm(hidden_dim))
+            # LeakyReLU keeps a small gradient for negative inputs, so units cannot die
+            layers.append(nn.LeakyReLU(0.01) if activation == "leaky_relu" else nn.ReLU())
+            return layers
+
         self.encoder = nn.Sequential(
-            nn.Linear(28 * 28, 128),
-            nn.ReLU(),
-            nn.Linear(128, 2),
+            *hidden_block(28 * 28),
+            nn.Linear(hidden_dim, latent_dim),
         )
 
         self.decoder = nn.Sequential(
-            nn.Linear(2, 128),
-            nn.ReLU(),
-            nn.Linear(128, 28 * 28),
+            *hidden_block(latent_dim),
+            nn.Linear(hidden_dim, 28 * 28),
             nn.Sigmoid(),
         )
 
-    def forward(self, x):
-        x = x.view(-1, 28 * 28)
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
-        decoded = decoded.view(-1, 1, 28, 28)
+    def encode(self, x):
+        return self.encoder(x.view(-1, 28 * 28))
 
-        return decoded
+    def decode(self, z):
+        return self.decoder(z).view(-1, 1, 28, 28)
+
+    def forward(self, x):
+        return self.decode(self.encode(x))
 
 
 class CNN(nn.Module):
