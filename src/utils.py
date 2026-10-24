@@ -87,7 +87,7 @@ class Scorer:
         plt.close()
 
     @torch.inference_mode()
-    def collect_record(self, epoch: int):
+    def collect_record(self):
         record = {"id": [], "label": [], "score": [], "normal": []}
 
         for step, (x, label) in enumerate(self.loader):
@@ -99,7 +99,10 @@ class Scorer:
             record["label"].append(int(label != SELECT_NORMAL))
             record["score"].append(loss)
 
-            if loss > self.THRESHOLDVAL:
+        self.THRESHOLDVAL = float(np.quantile(record["score"][record["label"] == 0], 0.95))
+
+        for score in record["score"]:
+            if score > self.THRESHOLDVAL:
                 record["normal"].append("0")
             else:
                 record["normal"].append("1")

@@ -1,6 +1,0 @@
-.git
-__pychache__
-*.pt
-*.pth
-.ipynb_checkpoints
-.data/

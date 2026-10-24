@@ -1,31 +1,22 @@
 {
-  "name": "ad_project",
-  "build": {
-	  "dockerfile": "../Dockerfile",
-	  "context": ".."
+  "name": "Python Deep Learning Environment",
+  "build":{
+    "dockerfile": "../Dockerfile",
+    "context": ".."
   },
-  "image": "ad_project",
-  
   "runArgs": [
-    "--rm",
     "--ipc=host",
-    "--gpus=all"
+    "--gpus=all",
+    "--rm"
   ],
-
-  "hostRequirements": {
-    "memory": "64gb"
-  },
-  "appPort": [
-    "8888:8888"
-  ],
-
-  "workspaceFolder": "/workspace",
-
   "customizations": {
     "vscode": {
       "extensions": [
-        "ms-python.python"
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "njpwerner.autodocstring"
       ]
     }
-  }
+  },
+  "forwardPorts": [8080],
 }

@@ -135,10 +135,9 @@ class Trainer:
 
         if epoch == self.epochs and total_samples > 0:
             self.scorer.visualize_IO(epoch, x)
-
+            
         return total_loss / total_samples
 
-        self.scorer.visualize_IO(epoch=epoch, samples=x, num_samples=4)
 
     @torch.inference_mode()
     def validate(self, epoch: int):
@@ -164,7 +163,7 @@ class Trainer:
             total_samples += x.size(0)
             pbar.set_postfix({"Loss": batch_loss})
 
-        self.scorer.collect_record(epoch)
+        self.scorer.collect_record()
         self.scorer.plot_auc(epoch)
         self.scorer.plot_score(epoch)
         self.scorer.plot_metrics(epoch)
@@ -249,7 +248,7 @@ class FeatureTrainer:
     def _loss_terms(self, batch):
         if self.is_vae:
             decoded, mu, logvar = self.model(batch, return_distribution=True)
-            reconstruction = self.criterion(decoded, batch)
+            reconstruction = self.criterion(decoded, batch).sum(1).mean()
             # Sum over latent dimensions, then average over samples.
             kl = -0.5 * (1 + logvar - mu.square() - logvar.exp()).sum(1).mean()
             return torch.stack(
@@ -257,7 +256,7 @@ class FeatureTrainer:
             )
         decoded, attention = self.model(batch, return_attention=True)
 
-        reconstruction = self.criterion(decoded, batch)
+        reconstruction = self.criterion(decoded, batch).sum(1).mean()
         entropy = -(attention * attention.clamp_min(1e-12).log()).sum(1).mean()
 
         return torch.stack(
@@ -278,7 +277,7 @@ class FeatureTrainer:
             else np.asarray(labels)
         )
         values = [
-            (self.model(batch) - batch).square().mean(1)
+            self.criterion(self.model(batch), batch).mean(1)
             for batch in features.split(batch_size)
         ]
         scores = torch.cat(values).cpu().numpy()

@@ -149,13 +149,11 @@ def run_fae(args: Namespace, m: str):
                 augmentations = v2.Compose(temp)
         except AttributeError as e:
             print(e)
-            print(f"Please check {args.augment} contains torchvision.transforms")
 
     try:
         train_criterion_class = getattr(nn, args.train_criterion)
     except AttributeError as e:
         print(e)
-        print(f"Please check {args.train_criterion} exist at `torch.nn`.")
         try:
             train_criterion_class = getattr(utils, args.train_criterion)
         except AttributeError as e:
@@ -166,7 +164,6 @@ def run_fae(args: Namespace, m: str):
         score_criterion_class = getattr(nn, args.score_criterion)
     except AttributeError as e:
         print(e)
-        print(f"Please check {args.score_criterion} exist at `torch.nn`.")
         try:
             score_criterion_class = getattr(utils, args.score_criterion)
         except AttributeError as e:
@@ -177,7 +174,6 @@ def run_fae(args: Namespace, m: str):
         optimizer_class = getattr(optim, args.optimizer)
     except AttributeError as e:
         print(e)
-        print(f"Please check {args.optimizer} at PyTorch optimizers")
 
     device = torch.device(args.device)
     torch.set_num_threads(2)
@@ -204,6 +200,8 @@ def run_fae(args: Namespace, m: str):
             hidden_dim=args.hidden_dim,
             latent_dim=args.latent_dim,
         ).to(device)
+        base = Path(args.log_dir) / "DINOVAE"
+        base.mkdir(parents=True, exist_ok=True)
     elif m == "FeatureMemAE":
         model = models.FeatureMemAE(
             input_dim=384,
@@ -213,16 +211,18 @@ def run_fae(args: Namespace, m: str):
             shrink_threshold=args.shrink_threshold,
             temperature=args.temperature,
         ).to(device)
+        base = Path(args.log_dir) / "MemAE"
+        base.mkdir(parents=True, exist_ok=True)
+    else:
+        raise NotImplementedError(f"{m} is not implemented in `main.py`")
 
     optimizer = optimizer_class(
         model.parameters(),
         lr=args.lr,
         weight_decay=args.weight_decay,
     )
-    train_criterion = train_criterion_class()
+    train_criterion = train_criterion_class(reduction='none')
 
-    base = Path(args.log_dir) / "MemAE"
-    base.mkdir(parents=True, exist_ok=True)
     number = (
         max(
             (
@@ -282,7 +282,7 @@ def run_fae(args: Namespace, m: str):
         ),
         encoding="utf-8",
     )
-    score_criterion = score_criterion_class()
+    score_criterion = score_criterion_class(reduction='none')
     scorer = Scorer(model, [], args.threshold, score_criterion, str(run), device)
     trainer = FeatureTrainer(
         model,
@@ -366,13 +366,11 @@ def main(args: Namespace):
                 augmentations = v2.Compose(temp)
         except AttributeError as e:
             print(e)
-            print(f"Please check {args.augment} contains torchvision.transforms")
 
     try:
         train_criterion_class = getattr(nn, args.train_criterion)
     except AttributeError as e:
         print(e)
-        print(f"Please check {args.train_criterion} exist at `torch.nn`.")
         try:
             train_criterion_class = getattr(utils, args.train_criterion)
         except AttributeError as e:
@@ -383,7 +381,6 @@ def main(args: Namespace):
         score_criterion_class = getattr(nn, args.score_criterion)
     except AttributeError as e:
         print(e)
-        print(f"Please check {args.score_criterion} exist at `torch.nn`.")
         try:
             score_criterion_class = getattr(utils, args.score_criterion)
         except AttributeError as e:
@@ -394,7 +391,6 @@ def main(args: Namespace):
         optimizer_class = getattr(optim, args.optimizer)
     except AttributeError as e:
         print(e)
-        print(f"Please check {args.optimizer} at PyTorch optimizers")
 
     try:
         model_list = []
@@ -432,17 +428,8 @@ def main(args: Namespace):
         score_criterion = score_criterion_class().to(device)
         optimizer = optimizer_class(model.parameters(), lr=args.lr)
 
-        log_path = args.log_dir + "/"
-        os.makedirs(log_path, mode=751, exist_ok=True)
-        print("Initializing Scorer")
-        scorer = Scorer(
-            model=model,
-            loader=test_loader,
-            threshold=args.threshold,
-            criterion=score_criterion,
-            log_dir=log_path,
-            device=device,
-        )
+        log_path = Path(args.log_dir) / name
+        os.makedirs(log_path, mode=755, exist_ok=True)
 
         print("Initializing Trainer")
         trainer = Trainer(
@@ -463,18 +450,26 @@ def main(args: Namespace):
         print("Fitting trainer")
         trained_model = trainer.fit()
 
-        print("Evaluating model")
-        scorer.collect_record(args.epochs)
+        print("Testing model")
+        print("Initializing Scorer")
+        scorer = Scorer(
+            model=trained_model,
+            loader=test_loader,
+            threshold=args.threshold,
+            criterion=score_criterion,
+            log_dir=log_path,
+            device=device,
+        )
+        scorer.collect_record()
         scorer.plot_auc(args.epochs)
         scorer.plot_score(args.epochs)
         scorer.save_record(args.epochs)
 
         print("Saving model")
-        save_path = args.log_dir
-        os.makedirs(save_path, mode=751, exist_ok=True)
-        torch.save(trained_model.state_dict(), save_path + f"/final_{name}_weight.pth")
+        save_path = log_path / "weight"
+        os.makedirs(save_path, mode=755, exist_ok=True)
+        torch.save(trained_model.state_dict(), save_path / f"final_{name}_weight.pth")
         print(f"Final trained model saved at {save_path}")
-
 
 if __name__ == "__main__":
     print("Start main.py")
