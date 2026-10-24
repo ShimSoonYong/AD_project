@@ -2,7 +2,10 @@
   "name": "Python Deep Learning Environment",
   "build":{
     "dockerfile": "../Dockerfile",
-    "context": ".."
+    "context": "..",
+    "options":[
+      "--tag=ad_project"
+    ]
   },
   "runArgs": [
     "--ipc=host",
@@ -18,5 +21,5 @@
       ]
     }
   },
-  "forwardPorts": [8080],
+  "forwardPorts": [8080]
 }
