@@ -12,5 +12,4 @@ docker run \
   ad_project \
   python src/main.py \
   --models AE \
-  --threshold 0.005 \
   --lr 1e-4

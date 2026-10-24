@@ -12,5 +12,4 @@ docker run \
   ad_project \
   python src/main.py \
   --models PCConvSumAE \
-  --threshold 0.04 \
   --lr 3e-4

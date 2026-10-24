@@ -32,12 +32,7 @@ def get_args():
         default=["FeatureMemAE"],
         help="A list of models to train and evaluate",
     )
-    parser.add_argument(
-        "--threshold",
-        type=float,
-        default=0.04,
-        help="Loss Threshold to classify anomalies",
-    )
+
     parser.add_argument(
         "--train_criterion",
         "--criterion",
@@ -221,7 +216,7 @@ def run_fae(args: Namespace, m: str):
         lr=args.lr,
         weight_decay=args.weight_decay,
     )
-    train_criterion = train_criterion_class(reduction='none')
+    train_criterion = train_criterion_class(reduction="none")
 
     number = (
         max(
@@ -282,7 +277,7 @@ def run_fae(args: Namespace, m: str):
         ),
         encoding="utf-8",
     )
-    score_criterion = score_criterion_class(reduction='none')
+    score_criterion = score_criterion_class(reduction="none")
     scorer = Scorer(model, [], args.threshold, score_criterion, str(run), device)
     trainer = FeatureTrainer(
         model,
@@ -435,7 +430,6 @@ def main(args: Namespace):
         trainer = Trainer(
             model=model,
             epochs=args.epochs,
-            threshold=args.threshold,
             train_loader=train_loader,
             val_loader=val_loader,
             criterion=train_criterion,
@@ -455,21 +449,22 @@ def main(args: Namespace):
         scorer = Scorer(
             model=trained_model,
             loader=test_loader,
-            threshold=args.threshold,
+            threshold=trainer.scorer.THRESHOLDVAL, # Use last val threshold
             criterion=score_criterion,
             log_dir=log_path,
             device=device,
         )
         scorer.collect_record()
-        scorer.plot_auc(args.epochs)
-        scorer.plot_score(args.epochs)
-        scorer.save_record(args.epochs)
+        scorer.plot_auc(args.epochs + 1)
+        scorer.plot_score(args.epochs + 1)
+        scorer.save_record(args.epochs + 1)
 
         print("Saving model")
         save_path = log_path / "weight"
         os.makedirs(save_path, mode=755, exist_ok=True)
         torch.save(trained_model.state_dict(), save_path / f"final_{name}_weight.pth")
         print(f"Final trained model saved at {save_path}")
+
 
 if __name__ == "__main__":
     print("Start main.py")

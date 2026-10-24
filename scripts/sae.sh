@@ -12,5 +12,4 @@ docker run \
   ad_project \
   python src/main.py \
   --models SAE \
-  --threshold 0.01 \
   --lr 1e-3

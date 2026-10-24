@@ -12,5 +12,4 @@ docker run \
   ad_project \
   python src/main.py \
   --models PCR \
-  --threshold 0.06 \
   --lr 1e-4

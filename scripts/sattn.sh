@@ -12,5 +12,4 @@ docker run \
   ad_project \
   python src/main.py \
   --models SAttn \
-  --threshold 0.1 \
   --lr 1e-4

@@ -20,7 +20,7 @@ class Scorer:
         self,
         model: nn.Module,
         loader: DataLoader,
-        threshold: float,
+        threshold: float | str,
         criterion: nn.Module,
         log_dir: str,
         device: torch.device,
@@ -99,7 +99,12 @@ class Scorer:
             record["label"].append(int(label != SELECT_NORMAL))
             record["score"].append(loss)
 
-        self.THRESHOLDVAL = float(np.quantile(record["score"][record["label"] == 0], 0.95))
+        if isinstance(self.THRESHOLDVAL, float):
+            pass
+        else:
+            self.THRESHOLDVAL = float(
+                np.quantile(record["score"][record["label"] == 0], 0.95)
+            )
 
         for score in record["score"]:
             if score > self.THRESHOLDVAL:

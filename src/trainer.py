@@ -27,7 +27,6 @@ class Trainer:
         self,
         model: nn.Module,
         epochs: int,
-        threshold: float,
         train_loader: DataLoader,
         val_loader: DataLoader,
         criterion: nn.Module,
@@ -68,7 +67,7 @@ class Trainer:
         self.scorer = Scorer(
             model=self.model,
             loader=val_loader,
-            threshold=threshold,
+            threshold="train",
             criterion=criterion,
             log_dir=log_dir,
             device=device,
@@ -133,11 +132,9 @@ class Trainer:
             total_samples += x.size(0)
             pbar.set_postfix({"Loss": batch_loss})
 
-        if epoch == self.epochs and total_samples > 0:
             self.scorer.visualize_IO(epoch, x)
-            
-        return total_loss / total_samples
 
+        return total_loss / total_samples
 
     @torch.inference_mode()
     def validate(self, epoch: int):

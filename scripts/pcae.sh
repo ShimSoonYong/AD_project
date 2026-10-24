@@ -12,5 +12,4 @@ docker run \
   ad_project \
   python src/main.py \
   --models PCAE \
-  --threshold 0.025 \
   --lr 1e-4

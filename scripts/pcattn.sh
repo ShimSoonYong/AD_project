@@ -12,5 +12,4 @@ docker run \
   ad_project \
   python src/main.py \
   --models PCAttn \
-  --threshold 0.055 \
   --lr 2e-4

@@ -12,5 +12,4 @@ docker run \
   ad_project \
   python src/main.py \
   --models ConvSumAE \
-  --threshold 0.1 \
   --lr 2e-5
