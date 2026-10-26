@@ -24,7 +24,7 @@
   "augment": [
     "none"
   ],
-  "batch_size": 64,
+  "batch_size": 128,
   "device": "cuda",
   "data_root": "/workspace/dataset/",
   "log_dir": "/workspace/logs",
@@ -37,7 +37,7 @@
   "hidden": 256,
   "latent": 128,
   "memory": 100,
-  "batch": 64,
+  "batch": 128,
   "entropy": 1.3e-06,
   "feature_backbone": {
     "backbone_name": "dinov2_vits14",
@@ -49,7 +49,7 @@
     "feature_normalization": "L2 along feature dimension",
     "preprocessing": "PIL RGB; bicubic resize256; crop224; ToTensor; ImageNet normalization",
     "extraction_device": "cuda",
-    "extraction_batch_size": 64,
+    "extraction_batch_size": 128,
     "tf32": false,
     "data_split_seed": 42,
     "tuning_anomaly_seed": 1337
