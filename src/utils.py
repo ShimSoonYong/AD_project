@@ -180,7 +180,6 @@ class Scorer:
         labels = np.array(self.record["label"])
         scores = np.array(self.record["score"])
 
-        # 라벨이 단일 클래스만 존재하는 경우 AUROC 계산 방지
         if len(np.unique(labels)) < 2:
             return
 

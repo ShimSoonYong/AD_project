@@ -1,16 +1,12 @@
 import os
-from pathlib import Path
-script_dir = Path(__file__).resolve().parent
-os.chdir(script_dir)
-
 import csv
 import json
 import random
 import matplotlib
+import numpy as np
+from pathlib import Path
 
 matplotlib.use("Agg")  # Save plots without requiring a desktop GUI backend.
-
-import numpy as np
 
 print("Running main.py in", os.getcwd())
 
@@ -147,7 +143,6 @@ def get_args():
     args = parser.parse_args()
     return args
 
-
 def run_fae(args: Namespace, m: str):
 
     if args.augment == ["none"]:
@@ -191,7 +186,6 @@ def run_fae(args: Namespace, m: str):
     features = data.load_dinov2_features(
         root=args.data_root, transforms=augmentations, device=device
     )
-    # Reset after backbone initialization/extraction so the trainable head matches run_126.
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -227,9 +221,7 @@ def run_fae(args: Namespace, m: str):
     else:
         raise NotImplementedError(f"{m} is not implemented in `main.py`")
 
-    score_criterion = score_criterion_class(reduction="none")
-
-    # Inference
+    # Inference Mode
     if args.mode == "inference":
         print(f"Running inference mode for {m}...", flush=True)
         run_dirs = sorted(
@@ -249,6 +241,19 @@ def run_fae(args: Namespace, m: str):
         config_data = json.loads(config_path.read_text(encoding="utf-8"))
         threshold = config_data.get("decision_threshold", 0.0)
 
+        saved_score_criterion_name = config_data.get("score_criterion", args.score_criterion)
+        try:
+            inference_score_criterion_class = getattr(nn, saved_score_criterion_name)
+        except AttributeError:
+            try:
+                inference_score_criterion_class = getattr(utils, saved_score_criterion_name)
+            except AttributeError as e:
+                raise AttributeError(
+                    f"Could not find score_criterion '{saved_score_criterion_name}' in nn or utils."
+                ) from e
+
+        inference_score_criterion = inference_score_criterion_class(reduction="none")
+
         weight_filename = (
             "best_MemAE_weight.pth" if m == "FeatureMemAE" else "best_VAE_weight.pth"
         )
@@ -260,14 +265,72 @@ def run_fae(args: Namespace, m: str):
         model.load_state_dict(torch.load(weight_path, map_location=device))
         model.eval()
 
-        scorer = Scorer(model, [], score_criterion, str(latest_run), device)
+        dummy_optimizer = optimizer_class(model.parameters(), lr=args.lr)
+
+        scorer = Scorer(
+            model=model,
+            loader=[],
+            mode="test",
+            threshold=threshold,
+            criterion=inference_score_criterion,
+            log_dir=str(latest_run),
+            device=device,
+        )
         scorer.THRESHOLDVAL = threshold
 
-        test_metrics, test_scores = scorer.evaluate(
+        trainer = FeatureTrainer(
+            model=model,
+            epochs=args.epochs,
+            features=features,
+            criterion=inference_score_criterion,
+            optimizer=dummy_optimizer,
+            scorer=scorer,
+            device=device,
+            batch_size=args.batch_size,
+            entropy_weight=args.entropy_weight,
+            seed=args.seed,
+            patience=args.patience,
+        )
+
+        test_metrics, test_scores = trainer.evaluate(
             features["test_x"],
             features["test_labels"],
             batch_size=1,
         )
+
+        epoch_tag = "inference"
+        scorer.record = {
+            "id": list(range(len(test_scores))),
+            "label": (features["test_labels"].numpy() != 2).astype(int).tolist(),
+            "score": test_scores.tolist(),
+            "normal": (test_scores <= threshold).astype(int).tolist(),
+        }
+        scorer.plot_auc(epoch_tag)
+        scorer.plot_score(epoch_tag)
+        scorer.save_record(epoch_tag)
+
+        with (latest_run / "test_scores_inference.csv").open(
+            "w", newline="", encoding="utf-8"
+        ) as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["id", "dataset_index", "class", "anomaly", "score"])
+            writer.writerows(
+                (i, int(idx), int(label), int(label != 2), float(score))
+                for i, (idx, label, score) in enumerate(
+                    zip(features["test_ids"], features["test_labels"], test_scores)
+                )
+            )
+
+        inference_metrics = {
+            "status": "complete_inference",
+            "selected_checkpoint": weight_path.name,
+            "decision_threshold": threshold,
+            "test_metrics": test_metrics,
+        }
+        (latest_run / "inference_metrics.json").write_text(
+            json.dumps(inference_metrics, indent=2), encoding="utf-8"
+        )
+
         print(
             json.dumps(
                 {
@@ -281,13 +344,14 @@ def run_fae(args: Namespace, m: str):
             flush=True,
         )
         return model
-
+    
     optimizer = optimizer_class(
         model.parameters(),
         lr=args.lr,
         weight_decay=args.weight_decay,
     )
     train_criterion = train_criterion_class(reduction="none")
+    score_criterion = score_criterion_class(reduction="none")
 
     number = (
         max(
@@ -313,6 +377,7 @@ def run_fae(args: Namespace, m: str):
     config = vars(args) | {
         "run": run.name,
         "model": f"{m}_DINOv2",
+        "score_criterion": args.score_criterion,
         "input_dim": 384,
         "feature_dim": 384,
         "hidden": args.hidden_dim,
@@ -425,7 +490,6 @@ def run_fae(args: Namespace, m: str):
     (run / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(json.dumps({"run": run.name, **metrics}, indent=2), flush=True)
     return model
-
 
 def main(args: Namespace):
     if min(args.epochs, args.batch_size) <= 0 or args.patience < 0:
