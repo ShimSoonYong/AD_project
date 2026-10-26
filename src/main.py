@@ -1,13 +1,14 @@
 import os
+from pathlib import Path
+script_dir = Path(__file__).resolve().parent
+os.chdir(script_dir)
+
 import csv
 import json
 import random
-from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")  # Save plots without requiring a desktop GUI backend.
-script_dir = Path(__file__).resolve().parent
-os.chdir(script_dir)
 
 import numpy as np
 
@@ -36,7 +37,7 @@ def get_args():
     )
     parser.add_argument(
         "--mode",
-        type=str,
+        choices=["train", "inference"],
         default="train",
         help="train or inference",
     )
