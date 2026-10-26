@@ -6,6 +6,8 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")  # Save plots without requiring a desktop GUI backend.
+script_dir = Path(__file__).resolve().parent
+os.chdir(script_dir)
 
 import numpy as np
 
