@@ -31,6 +31,7 @@ class Trainer:
         val_loader: DataLoader,
         criterion: nn.Module,
         optimizer: optim.Optimizer,
+        threshold_p: float,
         log_dir: str,
         device: torch.device,
         entropy_weight: float = 0.0001,
@@ -67,7 +68,8 @@ class Trainer:
         self.scorer = Scorer(
             model=self.model,
             loader=val_loader,
-            threshold="train",
+            mode="train",
+            threshold=threshold_p,
             criterion=criterion,
             log_dir=log_dir,
             device=device,

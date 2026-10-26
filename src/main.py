@@ -32,6 +32,19 @@ def get_args():
         default=["FeatureMemAE"],
         help="A list of models to train and evaluate",
     )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="train",
+        help="train or inference",
+    )
+
+    parser.add_argument(
+        "--threshold_p",
+        type=float,
+        default=0.95,
+        help="Percentile of validation scores to detemine threshold",
+    )
 
     parser.add_argument(
         "--train_criterion",
@@ -90,7 +103,7 @@ def get_args():
     parser.add_argument(
         "--epochs",
         type=int,
-        default=50,
+        default=100,
         help="Maximum epochs; feature models select the best validation AUROC",
     )
     parser.add_argument(
@@ -211,6 +224,61 @@ def run_fae(args: Namespace, m: str):
     else:
         raise NotImplementedError(f"{m} is not implemented in `main.py`")
 
+    score_criterion = score_criterion_class(reduction="none")
+
+    # Inference
+    if args.mode == "inference":
+        print(f"Running inference mode for {m}...", flush=True)
+        run_dirs = sorted(
+            [
+                p
+                for p in base.glob("run_*")
+                if p.is_dir() and (p / "config.json").exists()
+            ]
+        )
+        if not run_dirs:
+            raise FileNotFoundError(
+                f"No valid trained runs found in {base} for inference."
+            )
+        latest_run = run_dirs[-1]
+
+        config_path = latest_run / "config.json"
+        config_data = json.loads(config_path.read_text(encoding="utf-8"))
+        threshold = config_data.get("decision_threshold", 0.0)
+
+        weight_filename = (
+            "best_MemAE_weight.pth" if m == "FeatureMemAE" else "best_VAE_weight.pth"
+        )
+        weight_path = latest_run / weight_filename
+        if not weight_path.exists():
+            weight_path = latest_run / "final_MemAE_weight.pth"
+
+        print(f"Loading weights from {weight_path}")
+        model.load_state_dict(torch.load(weight_path, map_location=device))
+        model.eval()
+
+        scorer = Scorer(model, [], score_criterion, str(latest_run), device)
+        scorer.THRESHOLDVAL = threshold
+
+        test_metrics, test_scores = scorer.evaluate(
+            features["test_x"],
+            features["test_labels"],
+            batch_size=1,
+        )
+        print(
+            json.dumps(
+                {
+                    "mode": "inference",
+                    "model": m,
+                    "run": latest_run.name,
+                    "test_metrics": test_metrics,
+                },
+                indent=2,
+            ),
+            flush=True,
+        )
+        return model
+
     optimizer = optimizer_class(
         model.parameters(),
         lr=args.lr,
@@ -241,7 +309,7 @@ def run_fae(args: Namespace, m: str):
 
     config = vars(args) | {
         "run": run.name,
-        "model": "FeatureMemAE_DINOv2",
+        "model": f"{m}_DINOv2",
         "input_dim": 384,
         "feature_dim": 384,
         "hidden": args.hidden_dim,
@@ -255,7 +323,7 @@ def run_fae(args: Namespace, m: str):
         "eval_every": 1,
         "early_stopping_min_epoch": 100,
         "checkpoint_selection": "maximum AUROC on fixed labeled tuning validation",
-        "checkpoint_note": "Trainable FeatureMemAE only; DINOv2 weights remain frozen",
+        "checkpoint_note": "Trainable Feature Head only; DINOv2 weights remain frozen",
         "cudnn_deterministic": True,
         "cudnn_allow_tf32": True,
         "matmul_allow_tf32": False,
@@ -277,8 +345,15 @@ def run_fae(args: Namespace, m: str):
         ),
         encoding="utf-8",
     )
-    score_criterion = score_criterion_class(reduction="none")
-    scorer = Scorer(model, [], score_criterion, str(run), device)
+    scorer = Scorer(
+        model=model,
+        loader=[],
+        mode="train",
+        threshold=args.threshold_p,
+        criterion=score_criterion,
+        log_dir=str(run),
+        device=device,
+    )
     trainer = FeatureTrainer(
         model,
         args.epochs,
@@ -299,8 +374,12 @@ def run_fae(args: Namespace, m: str):
         batch_size=1,
     )
     threshold = float(
-        np.quantile(trainer.tuning_scores[features["tuning_labels"].numpy() == 2], 0.95)
+        np.quantile(
+            trainer.tuning_scores[features["tuning_labels"].numpy() == 2],
+            args.threshold_p,
+        )
     )
+    scorer.mode = "test"
     scorer.THRESHOLDVAL = threshold
     scorer.record = {
         "id": list(range(len(test_scores))),
@@ -414,8 +493,8 @@ def main(args: Namespace):
         train_set, val_set, test_set, args.batch_size, args.num_workers
     )
 
-    for model, name in zip(model_list, args.models):
-        model = model().to(device=device)
+    for model_cls, name in zip(model_list, args.models):
+        model = model_cls().to(device=device)
         train_criterion = train_criterion_class().to(device)
         score_criterion = score_criterion_class().to(device)
         optimizer = optimizer_class(model.parameters(), lr=args.lr)
@@ -423,6 +502,45 @@ def main(args: Namespace):
         log_path = Path(args.log_dir) / name / Path("seed" + str(args.seed))
         os.makedirs(log_path, mode=755, exist_ok=True)
 
+        # Inference
+        if args.mode == "inference":
+            print(f"Running inference mode for {name}...", flush=True)
+            save_path = log_path / "weight"
+            weight_file = save_path / f"best_{name}_weight.pth"
+            if not weight_file.exists():
+                weight_file = save_path / f"final_{name}_weight.pth"
+            if not weight_file.exists():
+                raise FileNotFoundError(f"Trained weight not found at {weight_file}")
+
+            print(f"Loading weights from {weight_file}")
+            model.load_state_dict(torch.load(weight_file, map_location=device))
+            model.eval()
+
+            # Threshold loading
+            config_file = log_path / "config.json"
+            if config_file.exists():
+                cfg = json.loads(config_file.read_text(encoding="utf-8"))
+                loaded_threshold = cfg.get("decision_threshold", 0.0)
+            else:
+                loaded_threshold = 0.0
+
+            scorer = Scorer(
+                model=model,
+                loader=test_loader,
+                mode="test",
+                threshold=loaded_threshold,
+                criterion=score_criterion,
+                log_dir=log_path,
+                device=device,
+            )
+            scorer.collect_record()
+            scorer.plot_auc("test")
+            scorer.plot_score("test")
+            scorer.save_record("test")
+            print(f"Inference completed for {name}")
+            continue
+
+        # Train
         print("Initializing Trainer")
         trainer = Trainer(
             model=model,
@@ -431,6 +549,7 @@ def main(args: Namespace):
             val_loader=val_loader,
             criterion=train_criterion,
             optimizer=optimizer,
+            threshold_p=args.threshold_p,
             log_dir=log_path,
             device=device,
             compactness_weight=args.compactness_weight,
@@ -446,6 +565,7 @@ def main(args: Namespace):
         scorer = Scorer(
             model=trained_model,
             loader=test_loader,
+            mode="test",
             threshold=trainer.scorer.THRESHOLDVAL,  # Use last val threshold
             criterion=score_criterion,
             log_dir=log_path,
@@ -461,6 +581,15 @@ def main(args: Namespace):
         os.makedirs(save_path, mode=755, exist_ok=True)
         torch.save(trained_model.state_dict(), save_path / f"final_{name}_weight.pth")
         print(f"Final trained model saved at {save_path}")
+
+        config = vars(args) | {
+            "model": name,
+            "decision_threshold": float(scorer.THRESHOLDVAL),
+            "torch_version": str(torch.__version__),
+        }
+        (log_path / "config.json").write_text(
+            json.dumps(config, indent=2), encoding="utf-8"
+        )
 
 
 if __name__ == "__main__":

@@ -7,14 +7,10 @@
 * **목표:** Fashion MNIST 데이터셋을 활용하여 정상(Normal) 샘플과 비정상(Abnormal) 샘플을 구별하는 이상 탐지 모델 개발
 * 데이터셋 규칙:
 
-
 * **Train Data:** 오직 `Label 2 (Pullover)`만 정상 샘플로 사용하여 모델 학습
 * **Test Data:** `Label 0 (T-shirt)`, `Label 2 (Pullover)`, `Label 4 (Coat)`, `Label 6 (Shirt)`를 사용하여 평가 진행
 
-
 * **핵심 평가 지표:** AUROC 및 Kaggle Leaderboard 성능
-
-
 
 ---
 
@@ -24,13 +20,9 @@
 
 1. **Reconstruction 기반 모델 필수:** 모델의 골자는 반드시 Autoencoder 등 Reconstruction 기반이어야 합니다. (Reconstruction을 중심으로 다른 기법을 추가하는 것은 허용). GAN, Diffusion 등을 사용해도 되나, 결과적으로 Reconstruction 방식을 따라야 합니다.
 
-
 2. **테스트 과정의 공정성 (매우 중요):** Test 과정에서 라벨(Label) 정보를 활용하여 Anomaly Score를 인위적으로 조작하거나(예: 가중치 곱하기, 특정 라벨에만 노이즈 추가), Test 데이터를 Train에 사용하는 등 인위적인 개입이 적발되면 0점 처리됩니다.
 
-
 3. **프레임워크 및 환경:** 반드시 **PyTorch**를 사용해야 하며(Keras, Tensorflow 불가), 훈련 시 필요 VRAM은 **10GB**를 초과할 수 없습니다. Mac 환경은 채점 제약으로 인해 불가하므로 Windows/Linux 또는 본 레포지토리의 Docker 환경을 사용합니다.
-
-
 
 ---
 
@@ -71,10 +63,10 @@
 
 | 항목 | 사양 / 설정 |
 | --- | --- |
-| CPU | AMD Ryzen 7 260 (사용자 제공) |
+| CPU | AMD Ryzen 7 260 |
 | GPU | NVIDIA GeForce RTX 5060 Laptop GPU, VRAM 8GB, compute capability 12.0 |
 | GPU 드라이버 | 616.92 |
-| RAM | 32GB (사용자 제공) |
+| RAM | 32GB |
 | 가상환경 위치 | `03 AD_Git/.venv` |
 | 프로젝트 마감 | 2026-10-26 |
 
@@ -161,38 +153,16 @@ docker run --gpus all -it -p 8888:8888 -v $(pwd):/workspace cv-anomaly-detection
 
 1. Kaggle 제출용 CSV 파일:
 
-
 * 모델 추론을 통해 얻은 dataframe (`.csv`). (하루 최대 10회 제출 가능, 팀 대표 1인이 제출)
 
-
-
-
-2. 최종 모델 코드 및 가중치 파일 (i-campus 제출):
-
+1. 최종 모델 코드 및 가중치 파일 (i-campus 제출):
 
 * `code submission form.pdf` 양식에 맞춘 주피터 노트북(`.ipynb`) 파일. (주의: `src/` 폴더에서 개발하더라도, 최종 제출 시에는 노트북 하나로 실행되도록 코드를 통합해야 함)
 
-
 * 훈련된 가중치 파일 (`.pt` 또는 `.pth`). 학습 없이 즉시 inference가 가능해야 함.
 
-
-
-
-3. 결과 리포트:
-
-
-* IEEE Conference Template (A4 양식, 2 column), Reference 포함 최대 2페이지 제한.
-
-
-* 영어/한국어 모두 가능.
-
-
-
-
-4. 발표 자료:
-
+1. 발표 자료:
 
 * 팀원 역할, 전체 흐름도, 우리 팀만의 아이디어, 결과(AUROC 그래프 및 수치 분석) 포함.
-
 
 * 생성형 AI 사용 시 모델명 및 Prompt 명시 필수.

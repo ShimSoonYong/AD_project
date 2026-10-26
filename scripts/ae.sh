@@ -1,22 +1,29 @@
 #!/bin/bash
 
-seeds=("42" "123" "951" "503" "9874")
+seeds=("42")
+thresholds=("0.95" "0.90" "0.85" "0.8" "0.75")
 
 for seed in "${seeds[@]}"; do
-  docker run \
-    --name ae \
-    --rm \
-    --detach \
-    --gpus all \
-    --ipc host \
-    --ulimit memlock=-1 \
-    --shm-size 32gb \
-    --volume $(pwd):/workspace \
-    ad_project \
-    python src/main.py \
-    --models AE \
-    --seed "$seed" \
-    --lr 1e-5
+  for threshold in "${thresholds[@]}"; do
+    docker run \
+      --name ae \
+      --rm \
+      --detach \
+      --gpus all \
+      --ipc host \
+      --ulimit memlock=-1 \
+      --shm-size 32gb \
+      --volume $(pwd):/workspace \
+      ad_project \
+      python src/main.py \
+      --models AE \
+      --threshold_p "$threshold" \
+      --seed "$seed" \
+      --lr 1e-5
 
-  docker wait ae
+    docker wait ae
+
+    docker rm -f ae
+
+  done
 done

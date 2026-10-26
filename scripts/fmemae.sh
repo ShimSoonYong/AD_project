@@ -1,60 +1,59 @@
 #!/bin/bash
 
-lr_options=("0.001" "0.0005" "0.0001" "0.0005" "0.00001")
-wd_options=("1e-4" "1e-5")
+lr_options=("0.001" "0.0005" "0.0001" "0.00001")
 criterons=("MSELoss" "L1Loss")
 memory_sizes=("50" "100" "200")
 latent_dims=("32" "64" "128")
-batch_sizes=("64" "128")
-seeds=("42" "123" "951" "503" "9874")
+thresholds=("0.95" "0.9" "0.85" "0.8" "0.75")
+seeds=("42")
 
 for seed in "${seeds[@]}"; do
-
-  for lr in "${lr_options[@]}"; do
-    for wd in "${wd_options[@]}"; do
+  for threshold in "${thresholds[@]}"; do
+    for lr in "${lr_options[@]}"; do
       for mem in "${memory_sizes[@]}"; do
         for lat in "${latent_dims[@]}"; do
-          for bs in "${batch_sizes[@]}"; do
-            for cr in "${criterons[@]}"; do
-              echo "=== Running with criterion=$cr, lr=$lr, weight_decay=$wd, memory_size=$mem, latent_dim=$lat, batch_size=$bs ==="
+          for cr in "${criterons[@]}"; do
+            echo "=== Running with criterion=$cr, lr=$lr, threshold_p=$threshold, memory_size=$mem, latent_dim=$lat ==="
 
-              docker run \
-                --name fmemae \
-                --rm \
-                --detach \
-                --gpus all \
-                --ipc host \
-                --ulimit memlock=-1 \
-                --shm-size 32gb \
-                --volume "$(pwd)":/workspace \
-                ad_project \
-                python src/main.py \
-                --models FeatureMemAE \
-                --train_criterion "$cr" \
-                --score_criterion "$cr" \
-                --optimizer AdamW \
-                --compactness_weight 0.0 \
-                --separateness_weight 0.0 \
-                --memory_margin 0.2 \
-                --entropy_weight 1.3e-6 \
-                --weight_decay "$wd" \
-                --latent_dim "$lat" \
-                --hidden_dim 256 \
-                --memory_size "$mem" \
-                --temperature 1.0 \
-                --shrink_threshold 0.01 \
-                --patience 80 \
-                --lr "$lr" \
-                --epochs 400 \
-                --augment none \
-                --batch_size "$bs" \
-                --num_workers 12 \
-                --seed "$seed"
+            docker run \
+              --name fmemae \
+              --detach \
+              --rm \
+              --gpus all \
+              --ipc host \
+              --ulimit memlock=-1 \
+              --shm-size 32gb \
+              --volume "$(pwd)":/workspace \
+              ad_project \
+              python src/main.py \
+              --models FeatureMemAE \
+              --train_criterion "$cr" \
+              --score_criterion "$cr" \
+              --optimizer AdamW \
+              --compactness_weight 0.0 \
+              --separateness_weight 0.0 \
+              --memory_margin 0.2 \
+              --entropy_weight 1.3e-6 \
+              --weight_decay 1e-4 \
+              --latent_dim "$lat" \
+              --hidden_dim 256 \
+              --memory_size "$mem" \
+              --temperature 1.0 \
+              --shrink_threshold 0.01 \
+              --patience 80 \
+              --lr "$lr" \
+              --threshold_p "$threshold" \
+              --epochs 400 \
+              --augment none \
+              --num_workers 12 \
+              --seed "$seed"
 
-              docker wait fmemae
-              echo "=== Finished combination ==="
-              echo ""
-            done
+            docker wait fmemae
+
+            docker rm -f fmemae
+
+            echo "=== Finished combination ==="
+            echo ""
           done
         done
       done

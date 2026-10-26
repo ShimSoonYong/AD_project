@@ -19,24 +19,38 @@ class Scorer:
     def __init__(
         self,
         model: nn.Module,
-        loader: DataLoader,
-        threshold: float | str,
+        loader: DataLoader | list,
+        mode: str,
+        threshold: float,
         criterion: nn.Module,
         log_dir: str,
         device: torch.device,
     ):
         self.model = model
         self.loader = loader
-        self.THRESHOLDVAL = threshold  # threshold val
+        self.mode = mode
+
+        if self.mode == "train":
+            assert threshold < 1.0 and threshold > 0.0, (
+                f"threshold percentile must in the range of [0, 1], not {threshold}"
+            )
+
+        self.threshold = threshold
+        self.THRESHOLDVAL = 0.0  # threshold val
         self.criterion = criterion
         self.LOG_DIR = log_dir
         self.DEVICE = device
+
+        # Best model tracking variables
+        self.best_auroc = -1.0
+        self.best_epoch = None
 
         os.makedirs(f"{self.LOG_DIR}/compare_io", mode=755, exist_ok=True)
         os.makedirs(f"{self.LOG_DIR}/hist", mode=755, exist_ok=True)
         os.makedirs(f"{self.LOG_DIR}/auroc", mode=755, exist_ok=True)
         os.makedirs(f"{self.LOG_DIR}/record", mode=755, exist_ok=True)
         os.makedirs(f"{self.LOG_DIR}/metrics", mode=755, exist_ok=True)
+        os.makedirs(f"{self.LOG_DIR}/weight", mode=755, exist_ok=True)
 
         # Container for progressive epoch metrics
         self.history = {
@@ -90,7 +104,7 @@ class Scorer:
 
     @torch.inference_mode()
     def collect_record(self):
-        record = {"id": [], "label": [], "score": [], "normal": []}
+        record = {"id": [], "label": [], "threshold": [], "score": [], "normal": []}
 
         for step, (x, label) in enumerate(self.loader):
             x = x.to(self.DEVICE)
@@ -101,17 +115,21 @@ class Scorer:
             record["label"].append(int(label != SELECT_NORMAL))
             record["score"].append(loss)
 
-        if isinstance(self.THRESHOLDVAL, float):
-            pass
-        else:
+        if self.mode == "test":
+            self.THRESHOLDVAL = self.threshold
+        elif self.mode == "train":
             self.THRESHOLDVAL = float(
-                np.quantile(record["score"][record["label"] == 0], 0.5)
+                np.quantile(record["score"][record["label"] == 0], self.threshold)
             )
+        else:
+            raise NotImplementedError(f"No mode like {self.mode} in Scorer.")
 
         for score in record["score"]:
             if score > self.THRESHOLDVAL:
+                record["threshold"].append(self.THRESHOLDVAL)
                 record["normal"].append("0")
             else:
+                record["threshold"].append(self.THRESHOLDVAL)
                 record["normal"].append("1")
 
         self.record = record
@@ -156,6 +174,27 @@ class Scorer:
         plt.ylabel("TPR")
         plt.savefig(f"{self.LOG_DIR}/auroc/epoch{epoch}_auroc.png", dpi=500)
         plt.close()
+
+    def save_best_model(self, epoch: int | str, model_name: str = "model"):
+        """Calculates current AUROC and saves the model weights if it's the best so far."""
+        labels = np.array(self.record["label"])
+        scores = np.array(self.record["score"])
+
+        # 라벨이 단일 클래스만 존재하는 경우 AUROC 계산 방지
+        if len(np.unique(labels)) < 2:
+            return
+
+        fpr, tpr, _ = roc_curve(labels, scores, pos_label=1)
+        current_auroc = float(auc(fpr, tpr))
+
+        if current_auroc > self.best_auroc:
+            self.best_auroc = current_auroc
+            self.best_epoch = epoch
+            save_path = Path(self.LOG_DIR) / "weight" / f"best_{model_name}_weight.pth"
+            torch.save(self.model.state_dict(), save_path)
+            print(
+                f"--> Saved Best Model at epoch {epoch} with AUROC: {current_auroc:.4f}"
+            )
 
     def plot_metrics(self, epoch: int | str):
         """Calculates current epoch summary metrics, tracks history, and plots progressive curves."""
@@ -243,11 +282,15 @@ class Scorer:
         plt.close()
 
     def save_record(self, epoch: int | str):
+        teamnumber = 2
+
+        df = pd.DataFrame.from_dict(self.record)
+        df.to_csv(f"{self.LOG_DIR}/record/epoch{epoch}_raw_team_{teamnumber}.csv")
+
         rec_copy = self.record.copy()
         rec_copy.pop("normal", None)
         rec_copy.pop("label", None)
         df = pd.DataFrame.from_dict(rec_copy)
-        teamnumber = 2
         df.to_csv(
             f"{self.LOG_DIR}/record/epoch{epoch}_result_team_{teamnumber}.csv",
             index=False,
