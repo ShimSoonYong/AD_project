@@ -49,7 +49,9 @@ class Scorer:
         }
 
     @torch.inference_mode()
-    def visualize_IO(self, epoch: int, samples: torch.Tensor, num_samples: int = 4):
+    def visualize_IO(
+        self, epoch: int | str, samples: torch.Tensor, num_samples: int = 4
+    ):
 
         num_samples = min(num_samples, samples.size(0))
         samples = samples[:num_samples]
@@ -103,7 +105,7 @@ class Scorer:
             pass
         else:
             self.THRESHOLDVAL = float(
-                np.quantile(record["score"][record["label"] == 0], 0.95)
+                np.quantile(record["score"][record["label"] == 0], 0.5)
             )
 
         for score in record["score"]:
@@ -114,7 +116,7 @@ class Scorer:
 
         self.record = record
 
-    def plot_score(self, epoch: int):
+    def plot_score(self, epoch: int | str):
         label = np.array(self.record["label"])
         score = np.array(self.record["score"])
 
@@ -142,7 +144,7 @@ class Scorer:
         plt.savefig(f"{self.LOG_DIR}/hist/epoch{epoch}_score_hist.png", dpi=500)
         plt.close()
 
-    def plot_auc(self, epoch: int):
+    def plot_auc(self, epoch: int | str):
         fpr, tpr, thresholds = roc_curve(
             self.record["label"], self.record["score"], pos_label=1
         )
@@ -155,7 +157,7 @@ class Scorer:
         plt.savefig(f"{self.LOG_DIR}/auroc/epoch{epoch}_auroc.png", dpi=500)
         plt.close()
 
-    def plot_metrics(self, epoch: int):
+    def plot_metrics(self, epoch: int | str):
         """Calculates current epoch summary metrics, tracks history, and plots progressive curves."""
         scores = np.array(self.record["score"])
         labels = np.array(self.record["label"])
@@ -240,7 +242,7 @@ class Scorer:
         plt.savefig(f"{self.LOG_DIR}/metrics/metrics_curves.png", dpi=500)
         plt.close()
 
-    def save_record(self, epoch: int):
+    def save_record(self, epoch: int | str):
         rec_copy = self.record.copy()
         rec_copy.pop("normal", None)
         rec_copy.pop("label", None)

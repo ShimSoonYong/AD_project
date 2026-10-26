@@ -90,7 +90,7 @@ def get_args():
     parser.add_argument(
         "--epochs",
         type=int,
-        default=400,
+        default=50,
         help="Maximum epochs; feature models select the best validation AUROC",
     )
     parser.add_argument(
@@ -195,7 +195,7 @@ def run_fae(args: Namespace, m: str):
             hidden_dim=args.hidden_dim,
             latent_dim=args.latent_dim,
         ).to(device)
-        base = Path(args.log_dir) / "DINOVAE"
+        base = Path(args.log_dir) / "DINOVAE" / Path("seed" + str(args.seed))
         base.mkdir(parents=True, exist_ok=True)
     elif m == "FeatureMemAE":
         model = models.FeatureMemAE(
@@ -206,7 +206,7 @@ def run_fae(args: Namespace, m: str):
             shrink_threshold=args.shrink_threshold,
             temperature=args.temperature,
         ).to(device)
-        base = Path(args.log_dir) / "MemAE"
+        base = Path(args.log_dir) / "MemAE" / Path("seed" + str(args.seed))
         base.mkdir(parents=True, exist_ok=True)
     else:
         raise NotImplementedError(f"{m} is not implemented in `main.py`")
@@ -278,7 +278,7 @@ def run_fae(args: Namespace, m: str):
         encoding="utf-8",
     )
     score_criterion = score_criterion_class(reduction="none")
-    scorer = Scorer(model, [], args.threshold, score_criterion, str(run), device)
+    scorer = Scorer(model, [], score_criterion, str(run), device)
     trainer = FeatureTrainer(
         model,
         args.epochs,
@@ -390,10 +390,7 @@ def main(args: Namespace):
     try:
         model_list = []
         for m in args.models:
-            if "FeatureMemAE" == m:
-                run_fae(args, m)
-                continue
-            elif "FeatureVAE" == m:
+            if m in ("FeatureMemAE", "FeatureVAE"):
                 run_fae(args, m)
                 continue
 
@@ -423,7 +420,7 @@ def main(args: Namespace):
         score_criterion = score_criterion_class().to(device)
         optimizer = optimizer_class(model.parameters(), lr=args.lr)
 
-        log_path = Path(args.log_dir) / name
+        log_path = Path(args.log_dir) / name / Path("seed" + str(args.seed))
         os.makedirs(log_path, mode=755, exist_ok=True)
 
         print("Initializing Trainer")
@@ -449,15 +446,15 @@ def main(args: Namespace):
         scorer = Scorer(
             model=trained_model,
             loader=test_loader,
-            threshold=trainer.scorer.THRESHOLDVAL, # Use last val threshold
+            threshold=trainer.scorer.THRESHOLDVAL,  # Use last val threshold
             criterion=score_criterion,
             log_dir=log_path,
             device=device,
         )
         scorer.collect_record()
-        scorer.plot_auc(args.epochs + 1)
-        scorer.plot_score(args.epochs + 1)
-        scorer.save_record(args.epochs + 1)
+        scorer.plot_auc("test")
+        scorer.plot_score("test")
+        scorer.save_record("test")
 
         print("Saving model")
         save_path = log_path / "weight"
