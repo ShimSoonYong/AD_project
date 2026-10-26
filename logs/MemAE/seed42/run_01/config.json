@@ -2,6 +2,8 @@
   "models": [
     "FeatureMemAE"
   ],
+  "mode": "train",
+  "threshold_p": 0.95,
   "train_criterion": "L1Loss",
   "score_criterion": "L1Loss",
   "optimizer": "AdamW",
@@ -11,13 +13,13 @@
   "entropy_weight": 1.3e-06,
   "kl_weight": 1e-05,
   "weight_decay": 0.0001,
-  "latent_dim": 32,
+  "latent_dim": 128,
   "hidden_dim": 256,
   "memory_size": 50,
   "temperature": 1.0,
   "shrink_threshold": 0.01,
   "patience": 80,
-  "lr": 0.001,
+  "lr": 0.0001,
   "epochs": 400,
   "augment": [
     "none"
@@ -28,12 +30,12 @@
   "log_dir": "/workspace/logs",
   "num_workers": 12,
   "seed": 42,
-  "run": "run_01",
+  "run": "run_180",
   "model": "FeatureMemAE_DINOv2",
   "input_dim": 384,
   "feature_dim": 384,
   "hidden": 256,
-  "latent": 32,
+  "latent": 128,
   "memory": 50,
   "batch": 64,
   "entropy": 1.3e-06,
@@ -57,9 +59,11 @@
   "eval_every": 1,
   "early_stopping_min_epoch": 100,
   "checkpoint_selection": "maximum AUROC on fixed labeled tuning validation",
-  "checkpoint_note": "Trainable FeatureMemAE only; DINOv2 weights remain frozen",
+  "checkpoint_note": "Trainable Feature Head only; DINOv2 weights remain frozen",
   "cudnn_deterministic": true,
   "cudnn_allow_tf32": true,
   "matmul_allow_tf32": false,
-  "torch_version": "2.14.1+cu130"
+  "torch_version": "2.14.1+cu130",
+  "decision_threshold": 0.007087005767971277,
+  "threshold_rule": "95th percentile of normal validation feature MSE; not used for AUROC"
 }
