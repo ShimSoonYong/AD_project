@@ -35,9 +35,9 @@ def find_max_value_in_jsons(root_dir: str, target_filename: str, target_key: str
 
 
 if __name__ == "__main__":
-    ROOT_DIRECTORY = "../logs"
+    ROOT_DIRECTORY = "./logs"
     TARGET_JSON = "metrics.json"
-    TARGET_KEY = "seleted_test"
+    TARGET_KEY = "selected_test.auroc"
 
     best_file, highest_value = find_max_value_in_jsons(
         ROOT_DIRECTORY, TARGET_JSON, TARGET_KEY
