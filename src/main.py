@@ -143,6 +143,7 @@ def get_args():
     args = parser.parse_args()
     return args
 
+
 def run_fae(args: Namespace, m: str):
 
     if args.augment == ["none"]:
@@ -235,18 +236,22 @@ def run_fae(args: Namespace, m: str):
             raise FileNotFoundError(
                 f"No valid trained runs found in {base} for inference."
             )
-        latest_run = run_dirs[-1]
+        latest_run = run_dirs[0]
 
         config_path = latest_run / "config.json"
         config_data = json.loads(config_path.read_text(encoding="utf-8"))
         threshold = config_data.get("decision_threshold", 0.0)
 
-        saved_score_criterion_name = config_data.get("score_criterion", args.score_criterion)
+        saved_score_criterion_name = config_data.get(
+            "score_criterion", args.score_criterion
+        )
         try:
             inference_score_criterion_class = getattr(nn, saved_score_criterion_name)
         except AttributeError:
             try:
-                inference_score_criterion_class = getattr(utils, saved_score_criterion_name)
+                inference_score_criterion_class = getattr(
+                    utils, saved_score_criterion_name
+                )
             except AttributeError as e:
                 raise AttributeError(
                     f"Could not find score_criterion '{saved_score_criterion_name}' in nn or utils."
@@ -344,7 +349,7 @@ def run_fae(args: Namespace, m: str):
             flush=True,
         )
         return model
-    
+
     optimizer = optimizer_class(
         model.parameters(),
         lr=args.lr,
@@ -490,6 +495,7 @@ def run_fae(args: Namespace, m: str):
     (run / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print(json.dumps({"run": run.name, **metrics}, indent=2), flush=True)
     return model
+
 
 def main(args: Namespace):
     if min(args.epochs, args.batch_size) <= 0 or args.patience < 0:
