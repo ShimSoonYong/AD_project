@@ -11,3 +11,4 @@ __pycache__/
 /logs/*
 /notebooks/source/*
 !**/.gitkeep
+!/src/models/backbone_weights/dinov2_vits14_pretrain.pth
