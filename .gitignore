@@ -10,6 +10,6 @@ __pycache__/
 /dataset/*
 /notebooks/source/*
 !**/.gitkeep
-!**/.
-!/logs/MemAE/seed42/run_183/
+!logs/MemAE/seed42/run_01/config.json
+!logs/MemAE/seed42/run_183/config.json
 !/src/models/backbone_weights/dinov2_vits14_pretrain.pth
