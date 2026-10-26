@@ -4,8 +4,8 @@
   ],
   "mode": "train",
   "threshold_p": 0.95,
-  "train_criterion": "L1Loss",
-  "score_criterion": "L1Loss",
+  "train_criterion": "MSELoss",
+  "score_criterion": "MSELoss",
   "optimizer": "AdamW",
   "compactness_weight": 0.0,
   "separateness_weight": 0.0,
@@ -15,11 +15,11 @@
   "weight_decay": 0.0001,
   "latent_dim": 128,
   "hidden_dim": 256,
-  "memory_size": 50,
+  "memory_size": 100,
   "temperature": 1.0,
   "shrink_threshold": 0.01,
   "patience": 80,
-  "lr": 0.0001,
+  "lr": 1e-05,
   "epochs": 400,
   "augment": [
     "none"
@@ -30,13 +30,13 @@
   "log_dir": "/workspace/logs",
   "num_workers": 12,
   "seed": 42,
-  "run": "run_180",
+  "run": "run_183",
   "model": "FeatureMemAE_DINOv2",
   "input_dim": 384,
   "feature_dim": 384,
   "hidden": 256,
   "latent": 128,
-  "memory": 50,
+  "memory": 100,
   "batch": 64,
   "entropy": 1.3e-06,
   "feature_backbone": {
@@ -64,6 +64,6 @@
   "cudnn_allow_tf32": true,
   "matmul_allow_tf32": false,
   "torch_version": "2.14.1+cu130",
-  "decision_threshold": 0.007087005767971277,
+  "decision_threshold": 0.003569061867892742,
   "threshold_rule": "95th percentile of normal validation feature MSE; not used for AUROC"
 }
