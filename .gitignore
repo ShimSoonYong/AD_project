@@ -8,7 +8,6 @@ __pycache__/
 .vscode/
 .git_token
 /dataset/*
-/logs/*
 /notebooks/source/*
 !**/.gitkeep
 !/src/models/backbone_weights/dinov2_vits14_pretrain.pth
